@@ -15,3 +15,9 @@ STSCI 5999 Project Repository
     - Run "nbstripout --install" in the command line in this depository. 
     - This will ensure that GitHub never shows the output of a JupyterNotebook, including any sensitive data. 
 
+5. Create your own branch called "name-work", e.g. "robbie-work" by running the following commands in the command line. 
+    - git branch name-work
+    - git checkout name-work
+    - git push -u origin name-work 
+
+6. Install all necessary packages using pip or conda as needed. 
