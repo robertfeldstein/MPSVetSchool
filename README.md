@@ -21,3 +21,6 @@ STSCI 5999 Project Repository
     - git push -u origin name-work 
 
 6. Install all necessary packages using pip or conda as needed. 
+
+7. As appropriate, merge changes from your branch to the main branch. Resolve conflicts as needed.
+
