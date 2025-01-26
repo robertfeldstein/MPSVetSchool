@@ -10,6 +10,8 @@ STSCI 5999 Project Repository
 
 3. Create a new folder called Data, within MPSVetSchool folder.
     - Save the "FinalDataSet.xlsx" file in this folder. 
+    - It is very important to have an exact directory called "Data/FinalDataSet.xlsx" and not to name it anything else. This is the directory that is included in the .gitignore file which ensures that the dataset is not uploaded to GitHub. 
+    - The dataset should NEVER be committed. If at any point you notice the dataset needs to be "added" or "staged" or anything of that nature, stop what you are doing since something is wrong. Do NOT commit. 
 
 4. Install the "nbstripout" package with pip or anaconda. 
     - Run "nbstripout --install" in the command line in this depository. 
