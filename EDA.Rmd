@@ -1,0 +1,19 @@
+---
+title: "EDA"
+author: "Melissa Eckert, Robert Feldstein, Yue Li, Haonan Chen"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+# Exploratory Data Analysis
+
+Load packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dotenv)
+library(openxlsx)
+
+```
+
+Load data 
+```{r}
+```
