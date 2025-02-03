@@ -65,5 +65,68 @@ core_df_cor <- cor(core_df_cor)
 ggplot(data = as.data.frame(as.table(core_df_cor)), aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) + theme_minimal() + labs(title = "Correlation Matrix of Core Attributes", x = "Attribute", y = "Attribute", fill = "Correlation") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
+```{r}
+# Make some violin plots of the core attributes with the other attributes 
+
+# predictive variables (these are binary)
+non_score_vars <- c("Hosp", "Early", "PIPActive", "PIPYN")
+score_categories <- c("medical", "clinical_reasoning", "professionalism", "collaboration")
+
+boxplot <- function(df, x, y) {
+  df_filtered <- df %>%
+    filter(!is.na(.data[[x]]), !is.na(.data[[y]])) %>%
+    mutate(!!x := as.factor(.data[[x]]))
+  
+  p <- ggplot(df_filtered, aes(x = .data[[x]], y = .data[[y]], fill = .data[[x]])) +
+    geom_boxplot(outlier.shape = 21, outlier.fill = "white", outlier.size = 2, width = 0.6) + 
+    stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "red") +  # Mean as red diamond
+    scale_fill_brewer(palette = "Set2") +  # Use a distinct color palette
+    ggtitle(paste("Boxplot of", y, "by", x)) +
+    xlab(x) +
+    ylab(y) +
+    theme_minimal(base_size = 14) +
+    theme(legend.position = "none", 
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(face = "bold", hjust = 0.5))
+  
+  print(p)
+}
+
+for (var in non_score_vars) {
+  for (cat in score_categories) {
+    boxplot(df, var, cat)
+  }
+}
+
+
+```
+
+## Is the data normally distributed?
+
+```{r}
+
+# Histogram of the core_scores 
+
+core_vals <- c("medical", "clinical_reasoning", "professionalism", "collaboration")
+
+
+for (val in core_vals) {
+  hist(df[[val]], main = paste("Histogram of", val), xlab = val)
+}
+
+
+```
+
+
+```{r}
+# Discretized data cannot be normally distributed, but we can still test for a different guide of normality
+
+
+
+# Use a discrete normality test to see if the data is normally distributed
+
+
+```
+
 
 
