@@ -11,9 +11,59 @@ Load packages
 knitr::opts_chunk$set(echo = FALSE)
 library(dotenv)
 library(openxlsx)
-
+library(tidyxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
 ```
 
 Load data 
 ```{r}
+df <- read.xlsx("Data/FinalDataSet.xlsx", sheet = 1)
 ```
+
+# Data Summary
+
+```{r}
+summary(df)
+```
+
+## Repetition of Python Work
+
+```{r}
+
+# Make a dataset that is just the first core attributes 
+core_scores <- c("UniqueID", "strBlock", "service", "medical", "clinical_reasoning", "professionalism", "collaboration")
+core_df <- df[, core_scores]
+
+# Remove rows with missing values
+core_df <- core_df %>% na.omit()
+
+# Group by strBlock to get the mean of each core attribute at each rotation
+core_df_grouped <- core_df %>% group_by(strBlock) %>% summarise_all(mean)
+core_df_grouped <- core_df_grouped %>% select(-UniqueID) %>% select(-service)
+
+# Plot the mean scores over the strBlocks
+
+core_df_grouped_long <- gather(core_df_grouped, key = "Attribute", value = "Score", -strBlock)
+
+ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + geom_line() + geom_point() + labs(title = "Mean Scores of Core Attributes Over Time", x = "Rotation", y = "Mean Score") + theme_minimal()
+
+
+
+
+
+```
+
+```{r}
+# Make correlation matrix
+
+core_df_cor <- core_df %>% select(-UniqueID) %>% select(-strBlock)  %>% select(-service)
+core_df_cor <- cor(core_df_cor)
+
+# Make into heatmap
+ggplot(data = as.data.frame(as.table(core_df_cor)), aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) + theme_minimal() + labs(title = "Correlation Matrix of Core Attributes", x = "Attribute", y = "Attribute", fill = "Correlation") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+
