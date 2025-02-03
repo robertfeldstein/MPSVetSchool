@@ -117,6 +117,10 @@ for (val in core_vals) {
 
 ```
 
+Obviously collaboration and professionalism are not normally distributed, they are basically just straight line increases where the vast majority of students are scoring well in both categories across all of the rotations. It may be a good idea to consider re-evaluating the way these scores are calculated in order to flatten out the curve.
+
+Medical and clinical reasoning could potentially look like a discrete gaussian distribution. At least at first glance they seem roughly bell-curve shaped. Of course, discrete data cannot be normal.
+
 
 ```{r}
 # Discretized data cannot be normally distributed, but we can still test for a different guide of normality
