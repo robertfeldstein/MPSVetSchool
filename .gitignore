@@ -178,3 +178,6 @@ Data/FinalDataSet.xlsx
 .Rproj.user
 MPSVetSchool.Rproj
 EDA.pdf
+
+# Any file in the images folder
+images/

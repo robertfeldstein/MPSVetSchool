@@ -48,7 +48,8 @@ core_df_grouped_long <- gather(core_df_grouped, key = "Attribute", value = "Scor
 ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + geom_line() + geom_point() + labs(title = "Mean Scores of Core Attributes Over Time", x = "Rotation", y = "Mean Score") + theme_minimal()
 
 
-
+# Save this image to the images folder
+ggsave("images/mean_scores.png", width = 10, height = 6)
 
 
 ```
