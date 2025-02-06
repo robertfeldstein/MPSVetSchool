@@ -146,7 +146,31 @@ plot(ecdf(df$clinical_reasoning), main = "Empirical CDF", col = "blue")
 
 
 ```
+```{r}
+# Let's focus on the medical scores category for now 
 
+mean_data <- mean(df$medical, na.rm=T)
+var_data <- var(df$medical, na.rm= T)
+# Mean is greater than the variance
+# Might be able to use the binomial distribution to model the data
+
+# remove na from df$medical
+dat <- df$medical[!is.na(df$medical)]
+size_hat <- max(dat)  # Assume the largest observed value as max trials
+prob_hat <- mean(dat) / size_hat  # Estimate probability of success
+glm_fit <- glm(dat / size_hat ~ 1, family = binomial, weights = rep(size_hat, length(dat)))
+summary(glm_fit)
+
+estimated_p <- coef(glm_fit)[1]
+# Convert to probability from log-odds
+estimated_p <- exp(estimated_p) / (1 + exp(estimated_p))
+
+# Simulate a binomial distribution with this probability, with n = size_hat
+
+simulated_data <- rbinom(1000, size = size_hat, prob = estimated_p)
+hist(simulated_data, main = "Simulated Binomial Distribution", xlab = "Score")
+
+```
 
 
 ```{r}
@@ -201,7 +225,7 @@ new_df$collaboration_badges <-
          ifelse(new_df$collaboration_points >= 17, 2, 
                 ifelse(new_df$collaboration_points >= 8, 1, 0)))
 
-grouped_df <- new_df %>% group_by(strBlock) %>% summarise(medical_badges = mean(medical_badges), clinical_reasoning_badges = mean(clinical_reasoning_badges), professionalism_badges = mean(professionalism_badges), collaboration_badges = mean(collaboration_badges))
+grouped_df <- new_df %>% group_by(strBlock) %>% summarise(medical = mean(medical_badges), clinical = mean(clinical_reasoning_badges), professionalism = mean(professionalism_badges), collaboration = mean(collaboration_badges))
 
 # Plot the four columns over the strBlock category
 grouped_df$strBlock <- factor(grouped_df$strBlock, levels = unique(grouped_df$strBlock))
