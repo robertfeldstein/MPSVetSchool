@@ -160,6 +160,7 @@ anova <- aov(medical ~ Hosp, data = hosp_df)
 summary(anova)
 
 ```
+
 ## Badging System
 
 ```{r}
@@ -237,6 +238,99 @@ hist(max_badges$clinical_reasoning_badges, main = "Histogram of Clinical Reasoni
 hist(max_badges$collaboration_badges, main = "Histogram of Collaboration Badges", xlab = "Collaboration Badges")
 
 hist(max_badges$professionalism_badges, main = "Histogram of Professionalism Badges", xlab = "Professionalism Badges")
+
+
+```
+
+
+## Mosaic Plots
+
+```{r}
+# Make some mosaic plots to see the distribution of badges compared to the hospital work
+
+individual_df <- df %>% group_by(UniqueID) %>% summarise(hospital = mean(Hosp), early = mean(Early), pip = mean(PIPYN))
+
+# Merge with the max_badges data on the uniqueID
+
+individual_df <- merge(individual_df, max_badges, by = "UniqueID")
+
+# Define a color palette
+colors <- c("#B31B1B", "#E8E8E8", "#7C0A02", "#FFFFFF")
+
+# Hospital vs Medical Badges
+mosaicplot(table(individual_df$hospital, individual_df$medical_badges), 
+           main = "Hospital vs Medical Badges",
+           xlab = "Hospital", 
+           ylab = "Medical Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Clinical Reasoning Badges
+mosaicplot(table(individual_df$hospital, individual_df$clinical_reasoning_badges), 
+           main = "Hospital vs Clinical Reasoning Badges",
+           xlab = "Hospital", 
+           ylab = "Clinical Reasoning Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Professionalism Badges
+mosaicplot(table(individual_df$hospital, individual_df$professionalism_badges), 
+           main = "Hospital vs Professionalism Badges",
+           xlab = "Hospital", 
+           ylab = "Professionalism Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Collaboration Badges
+mosaicplot(table(individual_df$hospital, individual_df$collaboration_badges), 
+           main = "Hospital vs Collaboration Badges",
+           xlab = "Hospital", 
+           ylab = "Collaboration Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+mosaic <- function(data, x, y, main, xlab, ylab, colors){
+  mosaicplot(table(data[[x]], data[[y]]), 
+             main = main,
+             xlab = xlab, 
+             ylab = ylab, 
+             col = colors, 
+             border = TRUE, 
+             las = 2, 
+             cex.axis = 0.8)
+}
+
+
+```
+
+```{r}
+# Repeat mosaic plots but for the early clinical rotation 
+
+# Hospital vs Medical Badges
+mosaic(individual_df, "early", "medical_badges", "Early vs Medical Badges", "Early", "Medical Badges", colors)
+mosaic(individual_df, "early", "clinical_reasoning_badges", "Early vs Clinical Reasoning Badges", "Early", "Clinical Reasoning Badges", colors)
+mosaic(individual_df, "early", "professionalism_badges", "Early vs Professionalism Badges", "Early", "Professionalism Badges", colors)
+mosaic(individual_df, "early", "collaboration_badges", "Early vs Collaboration Badges", "Early", "Collaboration Badges", colors)
+
+
+```
+
+```{r}
+# Repeat mosaic plots but for the PIPYN rotation
+
+mosaic(individual_df, "pip", "medical_badges", "PIPYN vs Medical Badges", "PIP", "Medical Badges", colors)
+mosaic(individual_df, "pip", "clinical_reasoning_badges", "PIPYN vs Clinical Reasoning Badges", "PIP", "Clinical Reasoning Badges", colors)
+mosaic(individual_df, "pip", "professionalism_badges", "PIPYN vs Professionalism Badges", "PIP", "Professionalism Badges", colors)
+mosaic(individual_df, "pip", "collaboration_badges", "PIPYN vs Collaboration Badges", "PIP", "Collaboration Badges", colors)
+
 
 
 ```
