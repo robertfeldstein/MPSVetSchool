@@ -9,9 +9,7 @@ output: pdf_document
 Load packages
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-library(dotenv)
 library(openxlsx)
-library(tidyxl)
 library(dplyr)
 library(ggplot2)
 library(tidyr)
@@ -54,6 +52,23 @@ ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + 
 
 
 ```
+
+
+```{r}
+# Select all the rows that have missing values
+df_missing <- df %>% filter(is.na(medical) | is.na(clinical_reasoning) | is.na(professionalism) | is.na(collaboration))
+df_missing
+# Why does service 6615 only have service_specific?
+# Not even the core categories are completely filled.
+```
+
+```{r}
+# Get counts of the number of times each column is not missing
+df %>% summarise_all(~sum(!is.na(.)))
+```
+
+As we can see, certain score categories have significantly more data than others.
+
 
 ```{r}
 # Make correlation matrix
@@ -125,12 +140,117 @@ Medical and clinical reasoning could potentially look like a discrete gaussian d
 ```{r}
 # Discretized data cannot be normally distributed, but we can still test for a different guide of normality
 
-
-
+plot(ecdf(df$medical), main = "Empirical CDF", col = "blue")
+plot(ecdf(df$clinical_reasoning), main = "Empirical CDF", col = "blue")
 # Use a discrete normality test to see if the data is normally distributed
 
 
 ```
+
+
+
+```{r}
+# Run an ANOVA to see if there is a difference between hospital scores and non-hospital scores
+hosp_df <- df[,c("UniqueID", "Hosp", "medical")]
+hosp_df <- hosp_df %>% na.omit()
+
+hosp_df$Hosp <- as.factor(hosp_df$Hosp)
+
+anova <- aov(medical ~ Hosp, data = hosp_df)
+summary(anova)
+
+```
+## Badging System
+
+```{r}
+
+# Make a badge score column for each of the core categories
+# A score of 4 is worth one point, a score of 5 is worth two points
+
+
+core_df$medical_points <- ifelse(core_df$medical == 4, 1, ifelse(core_df$medical == 5, 2, 0))
+core_df$clinical_reasoning_points <- ifelse(core_df$clinical_reasoning == 4, 1, ifelse(core_df$clinical_reasoning == 5, 2, 0))
+core_df$professionalism_points <- ifelse(core_df$professionalism == 4, 1, ifelse(core_df$professionalism == 5, 2, 0))
+core_df$collaboration_points <- ifelse(core_df$collaboration == 4, 1, ifelse(core_df$collaboration == 5, 2, 0))
+
+# First groupby uniqueID
+# Track the number of points each student has overtime
+
+new_df <- core_df %>% group_by(UniqueID) %>% mutate(medical_points = cumsum(medical_points), clinical_reasoning_points = cumsum(clinical_reasoning_points), professionalism_points = cumsum(professionalism_points), collaboration_points = cumsum(collaboration_points))
+
+# For medical points, create a column called medical badges
+# Once a student earns 5 medical points they get one badge, 10 is two badges, 16 is three badges
+
+new_df$medical_badges <- ifelse(new_df$medical_points >= 16, 3, ifelse(new_df$medical_points >= 10, 2, ifelse(new_df$medical_points >= 5, 1, 0)))
+
+# Same rules for clinical reasoning
+
+new_df$clinical_reasoning_badges <- ifelse(new_df$clinical_reasoning_points >= 16, 3, ifelse(new_df$clinical_reasoning_points >= 10, 2, ifelse(new_df$clinical_reasoning_points >= 5, 1, 0)))
+
+
+
+# Do the same for the other categories
+new_df$professionalism_badges <- 
+  ifelse(new_df$professionalism_points >= 23, 3, 
+         ifelse(new_df$professionalism_points >= 17, 2, 
+                ifelse(new_df$professionalism_points >= 8, 1, 0)))
+
+new_df$collaboration_badges <- 
+  ifelse(new_df$collaboration_points >= 23, 3, 
+         ifelse(new_df$collaboration_points >= 17, 2, 
+                ifelse(new_df$collaboration_points >= 8, 1, 0)))
+
+grouped_df <- new_df %>% group_by(strBlock) %>% summarise(medical_badges = mean(medical_badges), clinical_reasoning_badges = mean(clinical_reasoning_badges), professionalism_badges = mean(professionalism_badges), collaboration_badges = mean(collaboration_badges))
+
+# Plot the four columns over the strBlock category
+grouped_df$strBlock <- factor(grouped_df$strBlock, levels = unique(grouped_df$strBlock))
+
+grouped_df <- gather(grouped_df, key = "core_category", value = "points", -strBlock)
+
+ggplot(grouped_df, aes(x = strBlock, y = points, color = core_category, group = core_category)) + 
+  geom_line() + 
+  geom_point() +  # Add points to ensure visibility
+  ggtitle("Average Badges Over Time") + 
+  xlab("Block") + 
+  ylab("Average Badges") + 
+  theme_minimal(base_size = 14) + 
+  theme(legend.position = "top")
+
+
+
+
+
+```
+
+```{r}
+# Now we can look at the distribution of badges for each of the core categories
+
+
+max_badges <- new_df %>% group_by(UniqueID) %>% summarise(medical_badges = max(medical_badges), clinical_reasoning_badges = max(clinical_reasoning_badges), professionalism_badges = max(professionalism_badges), collaboration_badges = max(collaboration_badges))
+
+# Histogram of this data
+
+hist(max_badges$medical_badges, main = "Histogram of Medical Badges", xlab = "Medical Badges")
+
+hist(max_badges$clinical_reasoning_badges, main = "Histogram of Clinical Reasoning Badges", xlab = "Clinical Reasoning Badges")
+
+hist(max_badges$collaboration_badges, main = "Histogram of Collaboration Badges", xlab = "Collaboration Badges")
+
+hist(max_badges$professionalism_badges, main = "Histogram of Professionalism Badges", xlab = "Professionalism Badges")
+
+
+```
+
+
+
+Replication Analysis: 
+- Make the linear regression chart for each of the core four categories. Are there cases where the students are not improving over time?
+- Making a time series chart for the student scores. 
+- Take a linear regression of the core four categories to look at the percentage increase. 
+- Do they come in with lower medical knowledge and show a higher increase in medical knowledge?
+- Rerun the regressions as % change
+
+
 
 
 
