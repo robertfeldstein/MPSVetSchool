@@ -17,7 +17,7 @@ library(tidyr)
 
 Load data 
 ```{r}
-df <- read.xlsx("Data/FinalDataSet.xlsx", sheet = 1)
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
 ```
 
 # Data Summary
@@ -360,6 +360,28 @@ mosaic(individual_df, "pip", "collaboration_badges", "PIPYN vs Collaboration Bad
 
 ```
 
+Looking at Services
+```{r}
+df |>
+  mutate(service = factor(service, levels = unique(service))) |>
+  group_by(service) |>
+  summarise(across(c(medical, clinical_reasoning, professionalism, collaboration), mean, na.rm = TRUE)) |>
+  pivot_longer(cols = c(medical, clinical_reasoning, professionalism, collaboration), 
+               names_to = "Attribute", values_to = "Score") |>
+  ggplot(aes(x = service, y = Score, fill = Attribute)) + 
+  geom_col() +
+  theme(legend.position = "none") +
+  facet_wrap(~Attribute, scale = "free_y")+
+  theme_minimal() +
+  theme(legend.position = "none")+
+theme(axis.text.x = element_text(angle = 50, hjust =1, size = 8) ) +
+  labs(title = "Mean Scores of Core Attributes by Clinical Rotation", 
+       x = "Service")
+
+ggsave("images/service_scores.png", width = 10, height = 6)
+    
+  
+```
 
 
 Replication Analysis: 
