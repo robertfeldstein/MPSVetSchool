@@ -9,11 +9,407 @@ output: pdf_document
 Load packages
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-library(dotenv)
 library(openxlsx)
-
+library(dplyr)
+library(ggplot2)
+library(tidyr)
 ```
 
 Load data 
 ```{r}
+df <- read.xlsx("Data/FinalDataSet.xlsx", sheet = 1)
 ```
+
+# Data Summary
+
+```{r}
+summary(df)
+```
+
+## Repetition of Python Work
+
+```{r}
+
+# Make a dataset that is just the first core attributes 
+core_scores <- c("UniqueID", "strBlock", "service", "medical", "clinical_reasoning", "professionalism", "collaboration")
+core_df <- df[, core_scores]
+
+# Remove rows with missing values
+core_df <- core_df %>% na.omit()
+
+# Group by strBlock to get the mean of each core attribute at each rotation
+core_df_grouped <- core_df %>% group_by(strBlock) %>% summarise_all(mean)
+core_df_grouped <- core_df_grouped %>% select(-UniqueID) %>% select(-service)
+
+# Plot the mean scores over the strBlocks
+
+core_df_grouped_long <- gather(core_df_grouped, key = "Attribute", value = "Score", -strBlock)
+
+ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + geom_line() + geom_point() + labs(title = "Mean Scores of Core Attributes Over Time", x = "Rotation", y = "Mean Score") + theme_minimal()
+
+
+# Save this image to the images folder
+ggsave("images/mean_scores.png", width = 10, height = 6)
+
+
+```
+
+
+```{r}
+# Select all the rows that have missing values
+df_missing <- df %>% filter(is.na(medical) | is.na(clinical_reasoning) | is.na(professionalism) | is.na(collaboration))
+df_missing
+# Why does service 6615 only have service_specific?
+# Not even the core categories are completely filled.
+```
+
+```{r}
+# Get counts of the number of times each column is not missing
+df %>% summarise_all(~sum(!is.na(.)))
+```
+
+As we can see, certain score categories have significantly more data than others.
+
+
+```{r}
+# Make correlation matrix
+
+core_df_cor <- core_df %>% select(-UniqueID) %>% select(-strBlock)  %>% select(-service)
+core_df_cor <- cor(core_df_cor)
+
+# Make into heatmap
+ggplot(data = as.data.frame(as.table(core_df_cor)), aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) + theme_minimal() + labs(title = "Correlation Matrix of Core Attributes", x = "Attribute", y = "Attribute", fill = "Correlation") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Save this image to the images folder
+ggsave("images/correlation_matrix.png", width = 10, height = 6)
+```
+
+```{r}
+# Make some violin plots of the core attributes with the other attributes 
+
+# predictive variables (these are binary)
+non_score_vars <- c("Hosp", "Early", "PIPActive", "PIPYN")
+score_categories <- c("medical", "clinical_reasoning", "professionalism", "collaboration")
+
+boxplot <- function(df, x, y) {
+  df_filtered <- df %>%
+    filter(!is.na(.data[[x]]), !is.na(.data[[y]])) %>%
+    mutate(!!x := as.factor(.data[[x]]))
+  
+  p <- ggplot(df_filtered, aes(x = .data[[x]], y = .data[[y]], fill = .data[[x]])) +
+    geom_boxplot(outlier.shape = 21, outlier.fill = "white", outlier.size = 2, width = 0.6) + 
+    stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "red") +  # Mean as red diamond
+    scale_fill_brewer(palette = "Set2") +  # Use a distinct color palette
+    ggtitle(paste("Boxplot of", y, "by", x)) +
+    xlab(x) +
+    ylab(y) +
+    theme_minimal(base_size = 14) +
+    theme(legend.position = "none", 
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(face = "bold", hjust = 0.5))
+  
+  print(p)
+}
+
+for (var in non_score_vars) {
+  for (cat in score_categories) {
+    boxplot(df, var, cat)
+  }
+}
+
+
+```
+
+## Is the data normally distributed?
+
+```{r}
+
+# Histogram of the core_scores 
+
+core_vals <- c("medical", "clinical_reasoning", "professionalism", "collaboration")
+
+
+for (val in core_vals) {
+  hist(df[[val]], main = paste("Histogram of", val), xlab = val) 
+}
+
+
+```
+
+Obviously collaboration and professionalism are not normally distributed, they are basically just straight line increases where the vast majority of students are scoring well in both categories across all of the rotations. It may be a good idea to consider re-evaluating the way these scores are calculated in order to flatten out the curve.
+
+Medical and clinical reasoning could potentially look like a discrete gaussian distribution. At least at first glance they seem roughly bell-curve shaped. Of course, discrete data cannot be normal.
+
+
+```{r}
+# Discretized data cannot be normally distributed, but we can still test for a different guide of normality
+
+plot(ecdf(df$medical), main = "Empirical CDF", col = "blue")
+plot(ecdf(df$clinical_reasoning), main = "Empirical CDF", col = "blue")
+# Use a discrete normality test to see if the data is normally distributed
+
+
+```
+```{r}
+# Let's focus on the medical scores category for now 
+
+mean_data <- mean(df$medical, na.rm=T)
+var_data <- var(df$medical, na.rm= T)
+# Mean is greater than the variance
+# Might be able to use the binomial distribution to model the data
+
+# remove na from df$medical
+dat <- df$medical[!is.na(df$medical)]
+size_hat <- max(dat)  # Assume the largest observed value as max trials
+prob_hat <- mean(dat) / size_hat  # Estimate probability of success
+glm_fit <- glm(dat / size_hat ~ 1, family = binomial, weights = rep(size_hat, length(dat)))
+summary(glm_fit)
+
+estimated_p <- coef(glm_fit)[1]
+# Convert to probability from log-odds
+estimated_p <- exp(estimated_p) / (1 + exp(estimated_p))
+
+# Simulate a binomial distribution with this probability, with n = size_hat
+
+simulated_data <- rbinom(1000, size = size_hat, prob = estimated_p)
+
+# Plot the two histograms side by side
+par(mfrow = c(1, 2))
+hist(dat, main = "Observed Data", xlab = "Score")
+hist(simulated_data, main = "Simulated Binomial", xlab = "Score")
+
+
+```
+
+
+```{r}
+# Try a multinomial model instead
+
+library(nnet)
+
+# Break dat into training and testing 
+set.seed(123)
+train_idx <- sample(1:length(dat), length(dat) * 0.8)
+train_dat <- dat[train_idx]
+test_dat <- dat[-train_idx]
+
+# Fit a multinomial model to the training data
+
+multinom_fit <- multinom(as.factor(train_dat) ~ 1)  # Intercept-only model
+probs <- predict(multinom_fit, type = "probs")
+mean_probs <- colMeans(probs)
+print(mean_probs)  # Mean probability for each category
+simulated_data <- sample(2:5, size = 1000, replace = TRUE, prob = mean_probs)
+
+par(mfrow = c(1, 2))
+common_breaks <- seq(min(c(dat, simulated_data)), max(c(dat, simulated_data)), length.out = 6)
+hist(dat, breaks = common_breaks, main = "Observed Data", xlab = "Category")
+hist(simulated_data, breaks = common_breaks, main = "Simulated Multinomial", xlab = "Category")
+
+
+
+
+```
+
+
+
+```{r}
+# Run an ANOVA to see if there is a difference between hospital scores and non-hospital scores
+hosp_df <- df[,c("UniqueID", "Hosp", "medical")]
+hosp_df <- hosp_df %>% na.omit()
+
+hosp_df$Hosp <- as.factor(hosp_df$Hosp)
+
+anova <- aov(medical ~ Hosp, data = hosp_df)
+summary(anova)
+
+```
+
+## Badging System
+
+```{r}
+
+# Make a badge score column for each of the core categories
+# A score of 4 is worth one point, a score of 5 is worth two points
+
+
+core_df$medical_points <- ifelse(core_df$medical == 4, 1, ifelse(core_df$medical == 5, 2, 0))
+core_df$clinical_reasoning_points <- ifelse(core_df$clinical_reasoning == 4, 1, ifelse(core_df$clinical_reasoning == 5, 2, 0))
+core_df$professionalism_points <- ifelse(core_df$professionalism == 4, 1, ifelse(core_df$professionalism == 5, 2, 0))
+core_df$collaboration_points <- ifelse(core_df$collaboration == 4, 1, ifelse(core_df$collaboration == 5, 2, 0))
+
+# First groupby uniqueID
+# Track the number of points each student has overtime
+
+new_df <- core_df %>% group_by(UniqueID) %>% mutate(medical_points = cumsum(medical_points), clinical_reasoning_points = cumsum(clinical_reasoning_points), professionalism_points = cumsum(professionalism_points), collaboration_points = cumsum(collaboration_points))
+
+# For medical points, create a column called medical badges
+# Once a student earns 5 medical points they get one badge, 10 is two badges, 16 is three badges
+
+new_df$medical_badges <- ifelse(new_df$medical_points >= 16, 3, ifelse(new_df$medical_points >= 10, 2, ifelse(new_df$medical_points >= 5, 1, 0)))
+
+# Same rules for clinical reasoning
+
+new_df$clinical_reasoning_badges <- ifelse(new_df$clinical_reasoning_points >= 16, 3, ifelse(new_df$clinical_reasoning_points >= 10, 2, ifelse(new_df$clinical_reasoning_points >= 5, 1, 0)))
+
+
+
+# Do the same for the other categories
+new_df$professionalism_badges <- 
+  ifelse(new_df$professionalism_points >= 23, 3, 
+         ifelse(new_df$professionalism_points >= 17, 2, 
+                ifelse(new_df$professionalism_points >= 8, 1, 0)))
+
+new_df$collaboration_badges <- 
+  ifelse(new_df$collaboration_points >= 23, 3, 
+         ifelse(new_df$collaboration_points >= 17, 2, 
+                ifelse(new_df$collaboration_points >= 8, 1, 0)))
+
+grouped_df <- new_df %>% group_by(strBlock) %>% summarise(medical = mean(medical_badges), clinical = mean(clinical_reasoning_badges), professionalism = mean(professionalism_badges), collaboration = mean(collaboration_badges))
+
+# Plot the four columns over the strBlock category
+grouped_df$strBlock <- factor(grouped_df$strBlock, levels = unique(grouped_df$strBlock))
+
+grouped_df <- gather(grouped_df, key = "core_category", value = "points", -strBlock)
+
+ggplot(grouped_df, aes(x = strBlock, y = points, color = core_category, group = core_category)) + 
+  geom_line() + 
+  geom_point() +  # Add points to ensure visibility
+  ggtitle("Average Badges Over Time") + 
+  xlab("Block") + 
+  ylab("Average Badges") + 
+  theme_minimal(base_size = 14) + 
+  theme(legend.position = "top")
+
+# Save to images
+ggsave("images/badges_over_time.png", width = 10, height = 6, units = "in")
+
+
+
+```
+
+```{r}
+# Now we can look at the distribution of badges for each of the core categories
+
+
+max_badges <- new_df %>% group_by(UniqueID) %>% summarise(medical_badges = max(medical_badges), clinical_reasoning_badges = max(clinical_reasoning_badges), professionalism_badges = max(professionalism_badges), collaboration_badges = max(collaboration_badges))
+
+# Histogram of this data
+
+hist(max_badges$medical_badges, main = "Histogram of Medical Badges", xlab = "Medical Badges")
+
+hist(max_badges$clinical_reasoning_badges, main = "Histogram of Clinical Reasoning Badges", xlab = "Clinical Reasoning Badges")
+
+hist(max_badges$collaboration_badges, main = "Histogram of Collaboration Badges", xlab = "Collaboration Badges")
+
+hist(max_badges$professionalism_badges, main = "Histogram of Professionalism Badges", xlab = "Professionalism Badges")
+
+
+```
+
+
+## Mosaic Plots
+
+```{r}
+# Make some mosaic plots to see the distribution of badges compared to the hospital work
+
+individual_df <- df %>% group_by(UniqueID) %>% summarise(hospital = mean(Hosp), early = mean(Early), pip = mean(PIPYN))
+
+# Merge with the max_badges data on the uniqueID
+
+individual_df <- merge(individual_df, max_badges, by = "UniqueID")
+
+# Define a color palette
+colors <- c("#B31B1B", "#E8E8E8", "#7C0A02", "#FFFFFF")
+
+# Hospital vs Medical Badges
+mosaicplot(table(individual_df$hospital, individual_df$medical_badges), 
+           main = "Hospital vs Medical Badges",
+           xlab = "Hospital", 
+           ylab = "Medical Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Clinical Reasoning Badges
+mosaicplot(table(individual_df$hospital, individual_df$clinical_reasoning_badges), 
+           main = "Hospital vs Clinical Reasoning Badges",
+           xlab = "Hospital", 
+           ylab = "Clinical Reasoning Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Professionalism Badges
+mosaicplot(table(individual_df$hospital, individual_df$professionalism_badges), 
+           main = "Hospital vs Professionalism Badges",
+           xlab = "Hospital", 
+           ylab = "Professionalism Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+# Hospital vs Collaboration Badges
+mosaicplot(table(individual_df$hospital, individual_df$collaboration_badges), 
+           main = "Hospital vs Collaboration Badges",
+           xlab = "Hospital", 
+           ylab = "Collaboration Badges", 
+           col = colors, 
+           border = TRUE, 
+           las = 2, 
+           cex.axis = 0.8)
+
+mosaic <- function(data, x, y, main, xlab, ylab, colors){
+  mosaicplot(table(data[[x]], data[[y]]), 
+             main = main,
+             xlab = xlab, 
+             ylab = ylab, 
+             col = colors, 
+             border = TRUE, 
+             las = 2, 
+             cex.axis = 0.8)
+}
+
+
+```
+
+```{r}
+# Repeat mosaic plots but for the early clinical rotation 
+
+# Hospital vs Medical Badges
+mosaic(individual_df, "early", "medical_badges", "Early vs Medical Badges", "Early", "Medical Badges", colors)
+mosaic(individual_df, "early", "clinical_reasoning_badges", "Early vs Clinical Reasoning Badges", "Early", "Clinical Reasoning Badges", colors)
+mosaic(individual_df, "early", "professionalism_badges", "Early vs Professionalism Badges", "Early", "Professionalism Badges", colors)
+mosaic(individual_df, "early", "collaboration_badges", "Early vs Collaboration Badges", "Early", "Collaboration Badges", colors)
+
+
+```
+
+```{r}
+# Repeat mosaic plots but for the PIPYN rotation
+
+mosaic(individual_df, "pip", "medical_badges", "PIPYN vs Medical Badges", "PIP", "Medical Badges", colors)
+mosaic(individual_df, "pip", "clinical_reasoning_badges", "PIPYN vs Clinical Reasoning Badges", "PIP", "Clinical Reasoning Badges", colors)
+mosaic(individual_df, "pip", "professionalism_badges", "PIPYN vs Professionalism Badges", "PIP", "Professionalism Badges", colors)
+mosaic(individual_df, "pip", "collaboration_badges", "PIPYN vs Collaboration Badges", "PIP", "Collaboration Badges", colors)
+
+
+
+```
+
+
+
+Replication Analysis: 
+- Make the linear regression chart for each of the core four categories. Are there cases where the students are not improving over time?
+- Making a time series chart for the student scores. 
+- Take a linear regression of the core four categories to look at the percentage increase. 
+- Do they come in with lower medical knowledge and show a higher increase in medical knowledge?
+- Rerun the regressions as % change
+
+
+
+
+
