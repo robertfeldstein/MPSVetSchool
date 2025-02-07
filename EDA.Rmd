@@ -17,7 +17,7 @@ library(tidyr)
 
 Load data 
 ```{r}
-df <- read.xlsx("../Data/FinalDataSet.xlsx")
+df <- read.xlsx("Data/FinalDataSet.xlsx")
 ```
 
 # Data Summary
@@ -362,16 +362,23 @@ mosaicplot(table(individual_df$hospital, individual_df$collaboration_badges),
            las = 2, 
            cex.axis = 0.8)
 
-mosaic <- function(data, x, y, main, xlab, ylab, colors){
-  mosaicplot(table(data[[x]], data[[y]]), 
-             main = main,
-             xlab = xlab, 
-             ylab = ylab, 
-             col = colors, 
-             border = TRUE, 
-             las = 2, 
-             cex.axis = 0.8)
+mosaic <- function(data, x, y, main, xlab, ylab, colors, cex.main = 1.5, cex.lab = 1.2, cex.axis = 1) {
+  # Adjust global graphical parameters temporarily
+  old_par <- par(cex.main = cex.main, cex.lab = cex.lab, cex.axis = cex.axis)
+  on.exit(par(old_par))  # Restore original parameters after the function exits
+
+  # Generate the mosaic plot
+  mosaicplot(
+    table(data[[x]], data[[y]]), 
+    main = main,
+    xlab = xlab, 
+    ylab = ylab, 
+    col = colors, 
+    border = TRUE, 
+    las = 2
+  )
 }
+
 
 
 ```
@@ -400,6 +407,27 @@ mosaic(individual_df, "pip", "collaboration_badges", "PIPYN vs Collaboration Bad
 
 ```
 
+```{r}
+# Open a high-resolution PNG device
+png("images/mosaic_plots.png", width = 6000, height = 2000, res = 300)
+
+# Set up a 1-row, 4-column layout with adjusted margins
+par(mfrow = c(1, 4), mar = c(4, 2, 2, 2)) 
+
+# Generate mosaic plots
+mosaic(individual_df, "hospital", "medical_badges", "Hospital vs Medical", "Hospital", "Medical Badges", colors)
+mosaic(individual_df, "hospital", "clinical_reasoning_badges", "Hospital vs Clinical", "Hospital", "Clinical Reasoning Badges", colors)
+mosaic(individual_df, "pip", "medical_badges", "PIPYN vs Medical", "PIP", "Medical Badges", colors)
+mosaic(individual_df, "pip", "clinical_reasoning_badges", "PIPYN vs Clinical", "PIP", "Clinical Reasoning Badges", colors)
+
+# Close the graphics device
+dev.off()
+
+```
+
+
+
+
 Looking at Services
 ```{r}
 df |>
@@ -415,7 +443,7 @@ df |>
   theme_minimal() +
   theme(legend.position = "none")+
 theme(axis.text.x = element_text(angle = 50, hjust =1, size = 8) ) +
-  labs(title = "Mean Scores of Core Attributes by Clinical Rotation", 
+  labs(title = "Mean Scores of Core Attributes by Course", 
        x = "Service")
 
 ggsave("images/service_scores.png", width = 10, height = 6)
