@@ -79,6 +79,9 @@ core_df_cor <- cor(core_df_cor)
 
 # Make into heatmap
 ggplot(data = as.data.frame(as.table(core_df_cor)), aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) + theme_minimal() + labs(title = "Correlation Matrix of Core Attributes", x = "Attribute", y = "Attribute", fill = "Correlation") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Save this image to the images folder
+ggsave("images/correlation_matrix.png", width = 10, height = 6)
 ```
 
 ```{r}
@@ -127,7 +130,7 @@ core_vals <- c("medical", "clinical_reasoning", "professionalism", "collaboratio
 
 
 for (val in core_vals) {
-  hist(df[[val]], main = paste("Histogram of", val), xlab = val)
+  hist(df[[val]], main = paste("Histogram of", val), xlab = val) 
 }
 
 
@@ -169,9 +172,45 @@ estimated_p <- exp(estimated_p) / (1 + exp(estimated_p))
 # Simulate a binomial distribution with this probability, with n = size_hat
 
 simulated_data <- rbinom(1000, size = size_hat, prob = estimated_p)
-hist(simulated_data, main = "Simulated Binomial Distribution", xlab = "Score")
+
+# Plot the two histograms side by side
+par(mfrow = c(1, 2))
+hist(dat, main = "Observed Data", xlab = "Score")
+hist(simulated_data, main = "Simulated Binomial", xlab = "Score")
+
 
 ```
+
+
+```{r}
+# Try a multinomial model instead
+
+library(nnet)
+
+# Break dat into training and testing 
+set.seed(123)
+train_idx <- sample(1:length(dat), length(dat) * 0.8)
+train_dat <- dat[train_idx]
+test_dat <- dat[-train_idx]
+
+# Fit a multinomial model to the training data
+
+multinom_fit <- multinom(as.factor(train_dat) ~ 1)  # Intercept-only model
+probs <- predict(multinom_fit, type = "probs")
+mean_probs <- colMeans(probs)
+print(mean_probs)  # Mean probability for each category
+simulated_data <- sample(2:5, size = 1000, replace = TRUE, prob = mean_probs)
+
+par(mfrow = c(1, 2))
+common_breaks <- seq(min(c(dat, simulated_data)), max(c(dat, simulated_data)), length.out = 6)
+hist(dat, breaks = common_breaks, main = "Observed Data", xlab = "Category")
+hist(simulated_data, breaks = common_breaks, main = "Simulated Multinomial", xlab = "Category")
+
+
+
+
+```
+
 
 
 ```{r}
@@ -242,7 +281,8 @@ ggplot(grouped_df, aes(x = strBlock, y = points, color = core_category, group = 
   theme_minimal(base_size = 14) + 
   theme(legend.position = "top")
 
-
+# Save to images
+ggsave("images/badges_over_time.png", width = 10, height = 6, units = "in")
 
 
 
