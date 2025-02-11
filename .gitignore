@@ -177,7 +177,6 @@ Data/FinalDataSet.xlsx
 .DS_Store
 .Rproj.user
 MPSVetSchool.Rproj
-EDA.pdf
-
+*.pdf
 # Any file in the images folder
 images/

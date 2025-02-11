@@ -1,0 +1,107 @@
+---
+title: "Replication"
+author: "Robert Feldstein, Melissa Eckert, Yue Li, Kanna Chen"
+date: "2025-02-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+
+```
+
+Load in the dataset
+```{r}
+# Open the dataset
+df <- read.xlsx("Data/FinalDataSet.xlsx")
+```
+
+## Entrustment Score Distribution
+
+```{r}
+
+score_columns <- colnames(df)[4:16]
+# Store all of the scores in a single vector
+all_scores <- c(rep(NA, length(score_columns)))
+for (i in 1:length(score_columns)) {
+  all_scores <- c(all_scores, df[[score_columns[i]]])
+}
+
+# Remove NA values 
+all_scores <- all_scores[!is.na(all_scores)]
+
+mean_score <- mean(all_scores)
+
+# Add the mean of the score as text to the plot
+ggplot(data = data.frame(score = all_scores), aes(x = score)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black") +
+  labs(title = "Distribution of Entrustment Scores",
+       x = "Entrustment Score",
+       y = "Frequency") +
+  theme_minimal() +
+  geom_vline(xintercept = mean_score, color = "blue") +
+  annotate("text", x = 1, y = 7000, label = paste("Mean Score: ", round(mean_score, 2))) +
+  annotate("text", x = 1.5, y = 6000, label = paste("Total Observations: ", length(all_scores)))
+
+
+
+
+```
+
+```{r}
+# Test linear regression
+sample_df <- df[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")]
+
+# Categorical Model
+cat.fit <- lm(medical ~ strBlock, data = sample_df)
+
+
+# Linear Model
+# Convert strBlock to numeric 
+length(unique(sample_df$strBlock))
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1",
+            "D2", "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+sample_df$strBlockint<- label_mapping[sample_df$strBlock]
+
+
+# Make medical linear regression
+lm.fit.medical <- lm(medical ~ strBlockint, data = sample_df)
+summary(lm.fit.medical)
+
+# Make clinical reasoning linear regression
+lm.fit.clinical_reasoning <- lm(clinical_reasoning ~ strBlockint, data = sample_df)
+summary(lm.fit.clinical_reasoning)
+
+# Make professionalism linear regression
+lm.fit.professionalism <- lm(professionalism ~ strBlockint, data = sample_df)
+summary(lm.fit.professionalism)
+
+# Make collaboration linear regression
+lm.fit.collaboration <- lm(collaboration ~ strBlockint, data = sample_df)
+summary(lm.fit.collaboration)
+
+# Make patient care linear regression
+lm.fit.patient_care <- lm(patient_care ~ strBlockint, data = sample_df)
+summary(lm.fit.patient_care)
+
+
+
+
+```
+
+
+
+
+
+
