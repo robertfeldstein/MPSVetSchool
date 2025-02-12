@@ -65,8 +65,9 @@ cat.fit <- lm(medical ~ strBlock, data = sample_df)
 # Convert strBlock to numeric 
 length(unique(sample_df$strBlock))
 
-labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1",
-            "D2", "D3", "D4", "D5", "D6")
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
 
 # Create a mapping of labels to integers
 label_mapping <- setNames(1:length(labels), labels)
@@ -96,12 +97,93 @@ lm.fit.patient_care <- lm(patient_care ~ strBlockint, data = sample_df)
 summary(lm.fit.patient_care)
 
 
+```
+```{r}
+# Get the 25th percentile and 10th percentile of each of the scores
+
+# Manipulating Time
+
+columns <- c("medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")
+percentiles <- c(0.25, 0.10)
+nmat <- matrix(NA, nrow = length(columns), ncol = length(percentiles))
+
+for (i in 1:length(columns)) {
+  for (j in 1:length(percentiles)) {
+    nmat[i, j] <- quantile(df[[columns[i]]], probs = percentiles[j], na.rm=T)
+  }
+}
+
+rownames(nmat) <- columns
+colnames(nmat) <- paste0(percentiles * 100, "%")
+nmat
 
 
 ```
 
 
+```{r}
+
+# Comparison of Medical Knowledge Regression Curves with Respect to Professional Improvement Plans
+
+# Group 1: Students who never joined a PIP up to block ? 
+
+# Group 2: Students prior to joining a PIP at block?
+
+# Group 3: Students who never joined a PIP after block ?
+
+# Group 4: Students after joining a PIP at block ?
+
+comparison <- df[,c("UniqueID", "strBlock", "medical", "PIPYN", "PIPActive")]
+comparison$time<- label_mapping[comparison$strBlock]
+grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPActive))
+
+barplot(grouped$`sum(PIPActive)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Active by Block", xlab = "Block", ylab = "Number of Students")
 
 
+```
+
+```{r}
+# We'd really like to make a column called "PIPStart" that is 1 if the student started a PIP in that block and 0 otherwise
+
+comparison <- comparison %>% group_by(UniqueID) %>% mutate(PIPStart = ifelse(PIPActive == 1 & lag(PIPActive) == 0, 1, 0))
+
+# Now make a bar chart of the number of students who started a PIP in each block
+grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPStart))
+
+barplot(grouped$`sum(PIPStart)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Start by Block", xlab = "Block", ylab = "Number of Students")
+
+
+```
+
+
+## Fixed Effects Model
+
+```{r}
+# What is the best way to analyze the PIP data with student scores, given that students start PIPs at different times?
+
+library(fixest) # panel regression
+
+model <- feols(medical ~ PIPActive | UniqueID + strBlock, data = comparison)
+
+summary(model)
+
+
+
+```
+
+
+Students who joined a PIP are exected to have improved their medical scores by 0.088 points compared to had they not joined a PIP. This is not statistically significant at a 0.05 level. The test suggests that PIPs marginally improved student scores, but the test's results cannot be considered statistically significant. 
+
+
+## DiD
+
+```{r}
+comparison$did <- comparison$time * comparison$PIPYN
+
+didreg <- lm(medical~did + time + PIPYN, data = comparison)
+summary(didreg)
+```
+
+It appears that the interaction term between time and PIPYN is not statistically significant. This suggests that the PIPs did not have a significant effect on student medical scores.
 
 
