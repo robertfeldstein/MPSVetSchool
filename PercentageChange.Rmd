@@ -9,22 +9,99 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Linear Regression
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+We will be repeating a set of linear regressions performed by the client, 
+but with the expressed interest of examining the percentage change in scores.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r}
 
-```{r cars}
-summary(cars)
+library(readxl)
+library(dplyr)
+df <- read_excel("Data/FinalDataSet.xlsx")
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df$strBlockint<- label_mapping[df$strBlock]
+
+
 ```
 
-## Including Plots
+```{r}
 
-You can also embed plots, for example:
+# Make a simpler DF to look at the four main scoring categories
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+base_df <- df[,c("UniqueID", "strBlock", "strBlockint", "medical", "clinical_reasoning", 
+                 "professionalism", "collaboration", "Hosp",
+                 "Early", "PIPYN", "PIPActive")]
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+```{r}
+# Original Linear regressions
+lm.medical <- lm(medical ~ strBlockint, data = base_df)
+summary(lm.medical)
+
+lm.clinical <- lm(clinical_reasoning ~ strBlockint, data = base_df)
+summary(lm.clinical)
+
+lm.professionalism <- lm(professionalism ~ strBlockint, data = base_df)
+summary(lm.professionalism)
+
+lm.collaboration <- lm(collaboration ~ strBlockint, data = base_df)
+summary(lm.collaboration)
+
+
+```
+
+```{r}
+
+# Look at log changes in scores to be more easily comparable
+
+log.medical <- lm(log(medical) ~ strBlockint, data = base_df)
+summary(log.medical)
+
+log.clinical <- lm(log(clinical_reasoning) ~ strBlockint, data = base_df)
+summary(log.clinical)
+
+log.professionalism <- lm(log(professionalism) ~ strBlockint, data = base_df)
+summary(log.professionalism)
+
+log.collaboration <- lm(log(collaboration) ~ strBlockint, data = base_df)
+summary(log.collaboration)
+
+
+
+```
+
+```{r}
+# Collect all the coefficients and take their exponent to get the percentage change
+
+med_pct <- (exp(coef(log.medical))[2]-1)*100
+cli_pct <- (exp(coef(log.clinical))[2]-1)*100
+pro_pct <- (exp(coef(log.professionalism))[2]-1)*100
+col_oct <- (exp(coef(log.collaboration))[2]-1)*100
+
+# Put this information into a table
+
+
+pct_change <- data.frame("Category" = c("Medical", "Clinical Reasoning", "Professionalism", "Collaboration"),
+                         "PercentageGrowthPerRotation" = c(med_pct, cli_pct, pro_pct, col_oct))                        
+
+pct_change
+```
+
+Here we see by taking a log-transformation the medical and clinical reasoning score categories grow almost twice as quickly as scores in professionalism and collaboration. This is slightly different from the original linear regressions, which would not emphasize the difference in growth rates between the categories.
+
+
+
+
+
