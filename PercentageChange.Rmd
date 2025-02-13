@@ -88,13 +88,31 @@ summary(log.collaboration)
 med_pct <- (exp(coef(log.medical))[2]-1)*100
 cli_pct <- (exp(coef(log.clinical))[2]-1)*100
 pro_pct <- (exp(coef(log.professionalism))[2]-1)*100
-col_oct <- (exp(coef(log.collaboration))[2]-1)*100
+col_pct <- (exp(coef(log.collaboration))[2]-1)*100
+
+# Collect information on the intercept terms
+
+med_int <- exp(coef(log.medical))[1]
+cli_int <- exp(coef(log.clinical))[1]
+pro_int <- exp(coef(log.professionalism))[1]
+col_int <- exp(coef(log.collaboration))[1]
+
+# Calculate the expected final score for each category after 25 rotations
+# final = (1+rate)^25 * initial
+
+med_final <- med_int * (1 + med_pct/100)^25
+cli_final <- cli_int * (1 + cli_pct/100)^25
+pro_final <- pro_int * (1 + pro_pct/100)^25
+col_final <- col_int * (1 + col_pct/100)^25
+
 
 # Put this information into a table
 
 
 pct_change <- data.frame("Category" = c("Medical", "Clinical Reasoning", "Professionalism", "Collaboration"),
-                         "PercentageGrowthPerRotation" = c(med_pct, cli_pct, pro_pct, col_oct))                        
+                         "PercentageGrowthPerRotation" = c(med_pct, cli_pct, pro_pct, col_pct),
+                         "Expected Starting Score" = c(med_int, cli_int, pro_int, col_int),
+                         "Expected Final Score" = c(med_final, cli_final, pro_final, col_final))                        
 
 pct_change
 ```
@@ -102,6 +120,41 @@ pct_change
 Here we see by taking a log-transformation the medical and clinical reasoning score categories grow almost twice as quickly as scores in professionalism and collaboration. This is slightly different from the original linear regressions, which would not emphasize the difference in growth rates between the categories.
 
 
+```{r}
+
+# Add %-change to the original table
+
+base_df <- base_df %>%
+  group_by(UniqueID) %>%  # Ensure percentage change is calculated within each student
+  mutate(medical_pct = (medical - lag(medical)) / lag(medical) * 100, 
+         clinical_pct = (clinical_reasoning - lag(clinical_reasoning)) / lag(clinical_reasoning) * 100,
+         professionalism_pct = (professionalism - lag(professionalism)) / lag(professionalism) * 100,
+         collaboration_pct = (collaboration - lag(collaboration)) / lag(collaboration) * 100)
+
+base_df <- base_df %>%
+  mutate(medical_pct = ifelse(is.na(medical_pct), 0, medical_pct),
+         clinical_pct = ifelse(is.na(clinical_pct), 0, clinical_pct),
+         professionalism_pct = ifelse(is.na(professionalism_pct), 0, professionalism_pct),
+         collaboration_pct = ifelse(is.na(collaboration_pct), 0, collaboration_pct))
+
+# Now do regressions on these percentage changes
+
+lm.medical_pct <- lm(medical_pct ~ strBlockint, data = base_df)
+summary(lm.medical_pct)
+
+lm.clinical_pct <- lm(clinical_pct ~ strBlockint, data = base_df)
+summary(lm.clinical_pct)
+
+lm.professionalism_pct <- lm(professionalism_pct ~ strBlockint, data = base_df)
+summary(lm.professionalism_pct)
+
+lm.collaboration_pct <- lm(collaboration_pct ~ strBlockint, data = base_df)
+summary(lm.collaboration_pct)
 
 
+
+
+```
+
+These regressions are not significant at all, and probably should be discarded.
 
