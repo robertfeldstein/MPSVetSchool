@@ -121,6 +121,17 @@ nmat
 ```
 
 
+
+
+```{r}
+# Make residual plots for each of the scores
+# Medical residual plot
+plot(lm.fit.medical, which = 1)
+
+
+```
+
+
 ```{r}
 
 # Comparison of Medical Knowledge Regression Curves with Respect to Professional Improvement Plans
@@ -175,15 +186,29 @@ summary(model)
 Students who joined a PIP are exected to have improved their medical scores by 0.088 points compared to had they not joined a PIP. This is not statistically significant at a 0.05 level. The test suggests that PIPs marginally improved student scores, but the test's results cannot be considered statistically significant. 
 
 
-## DiD
-
 ```{r}
-comparison$did <- comparison$time * comparison$PIPYN
-
-didreg <- lm(medical~did + time + PIPYN, data = comparison)
-summary(didreg)
+ggplot(df, aes(x = factor(medical), fill = factor(PIPActive))) +
+  geom_bar(position = "fill") +
+  labs(x = "Score", y = "Proportion", fill = "PIP Active") +
+  theme_minimal()
 ```
 
-It appears that the interaction term between time and PIPYN is not statistically significant. This suggests that the PIPs did not have a significant effect on student medical scores.
+
+```{r}
+library(MASS)
+
+# Convert score to an ordered factor
+df$medical <- factor(df$medical, levels = 1:5, ordered = TRUE)
+
+# Fit ordinal logistic regression
+model <- polr(medical ~ PIPActive, data = df, Hess = TRUE)
+
+# Summary of model
+summary(model)
+
+# Get odds ratios
+exp(coef(model))
+
+```
 
 
