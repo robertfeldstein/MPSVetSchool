@@ -18,7 +18,7 @@ library(openxlsx)
 Load in the dataset
 ```{r}
 # Open the dataset
-df <- read.xlsx("Data/FinalDataSet.xlsx")
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
 ```
 
 ## Entrustment Score Distribution
@@ -211,4 +211,100 @@ exp(coef(model))
 
 ```
 
+## Comparison of Entrustment Scores between Student Employees & Student Non-employees
+```{r}
+#simple linear regression
+df2<- df |>
+  select(strBlock, Hosp, Average) |>
+  mutate(Hosp = factor(Hosp, labels = c("No Hospital Job", "Hospital Job")))
 
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# convert strBlock column to integers
+df2$strBlockint<- label_mapping[df2$strBlock]
+
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Hosp, data = df2)
+summary(fit)
+
+#Considering strBlock as a predictor
+fit2<- lm(Average ~ Hosp + strBlockint, data = df2)
+
+
+#strBlock * Hosp interaction term
+fit3<- lm(Average ~ Hosp * strBlockint, data = df2)
+
+
+df2 |>
+  group_by(strBlock, Hosp) |>
+  summarize(hosp_entrustment_score = mean(Average))|>
+ggplot(aes(x = strBlock, y = hosp_entrustment_score, color = Hosp)) + 
+  geom_point() +
+  geom_smooth(method = "lm",se = FALSE, aes(group = Hosp)) +
+  scale_y_continuous(limits = c(1,5) ) +
+  scale_color_manual(values = c("red", "blue")) +
+  labs(title = "Comparison of Entrustment Scores Between Student Employees 
+       & Student Non-Employees", x = "Rotation Block",
+       y = "Entrustment Score", color = "Mean by Rotation") + 
+  theme_minimal()
+```
+```{r}
+#t-test to compare means between the two groups 
+t.test(Average ~ Hosp, data = df2, var.equal = FALSE )
+
+#highly significant!
+```
+
+## Comparison of Entrustment Scores Between Students Who Compeleted Introductory Rotation Courses vs Those Who Didn't
+```{r}
+#simple linear regression
+df3<- df |>
+  select(strBlock, Early, Average) |>
+  mutate(Early = factor(Early, labels = c("No Introductory Course", "Introductory Rotation Course")))
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# convert strBlock column to integers
+df3$strBlockint<- label_mapping[df3$strBlock]
+
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Early, data = df3)
+summary(fit)
+
+#Considering strBlock as a predictor
+fit2<- lm(Average ~ Early + strBlockint, data = df3)
+
+
+#strBlock * Hosp interaction term
+fit3<- lm(Average ~ Early * strBlockint, data = df3)
+
+
+df3 |>
+  group_by(strBlock, Early) |>
+  summarize(early_entrustment_score = mean(Average))|>
+ggplot(aes(x = strBlock, y = early_entrustment_score, color = Early)) + 
+  geom_point() +
+  geom_smooth(method = "lm",se = FALSE, aes(group = Early)) +
+  scale_y_continuous(limits = c(1,5) ) +
+  scale_color_manual(values = c("red", "blue")) + 
+    labs(title = "Comparison of Entrustment Scores Between Students Who
+       Completed Introductory Rotations vs Those Who Did Not", x = "Rotation Block",
+       y = "Entrustment Score", color = "Mean by Rotation") +
+  theme_minimal()
+```
+```{r}
+#t-test to compare means between the two groups 
+t.test(Average ~ Early, data = df3, var.equal = FALSE )
+
+#no significant difference
+```
