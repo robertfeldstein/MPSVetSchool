@@ -194,20 +194,26 @@ ggplot(df, aes(x = factor(medical), fill = factor(PIPActive))) +
 ```
 
 
+## Are PIPs Effective?
+
+First start by assuming that most PIPs start in A7. 
+
 ```{r}
-library(MASS)
 
-# Convert score to an ordered factor
-df$medical <- factor(df$medical, levels = 1:5, ordered = TRUE)
+# The Research Question would be as Follows 
+# Would students enrolled in a PIP have lower scores than had they not enrolled in a PIP?
+library(fixest)
 
-# Fit ordinal logistic regression
-model <- polr(medical ~ PIPActive, data = df, Hess = TRUE)
 
-# Summary of model
-summary(model)
+# Make a column called Post which is after A7
 
-# Get odds ratios
-exp(coef(model))
+df$Post <- df$strBlockInt
+
+
+did_model <- feols(Average ~ PIPYN * PIPActive | UniqueID + service + Hosp, data = df)
+summary(did_model)
+
+
 
 ```
 
@@ -260,6 +266,10 @@ t.test(Average ~ Hosp, data = df2, var.equal = FALSE )
 #highly significant!
 ```
 
+robbie-work
+
+
+
 ## Comparison of Entrustment Scores Between Students Who Compeleted Introductory Rotation Courses vs Those Who Didn't
 ```{r}
 #simple linear regression
@@ -308,3 +318,4 @@ t.test(Average ~ Early, data = df3, var.equal = FALSE )
 
 #no significant difference
 ```
+main
