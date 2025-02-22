@@ -1,0 +1,79 @@
+---
+title: "Replication Study"
+author: "Yue Li"
+date: "2/16/2025"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Regression
+
+```{r}
+# Load necessary package
+library(readxl)
+
+# Read the Excel file
+data <- read_excel("FinalDataSet.xlsx")
+
+# Function to convert a strBlock (e.g., "A1", "D6") to a numeric time value (A1=1, D6=24)
+convertBlock <- function(block) {
+  # Extract the letter and the number parts
+  letter <- substr(block, 1, 1)
+  number <- as.numeric(substr(block, 2, nchar(block)))
+  # Convert letter to a numeric index (A=1, B=2, C=3, D=4)
+  letter_index <- match(letter, c("A", "B", "C", "D"))
+  # Calculate the numeric time: each letter represents 6 blocks
+  return((letter_index - 1) * 6 + number)
+}
+
+# Create a new numeric variable for strBlock
+data$block_numeric <- sapply(data$strBlock, convertBlock)
+
+# Identify the attribute columns: from "medical" to "service_specific"
+start_col <- match("medical", names(data))
+end_col <- match("service_specific", names(data))
+attributes <- names(data)[start_col:end_col]
+# Add "Average" as an extra attribute
+attributes <- c(attributes, "Average")
+
+# Loop over each attribute to perform regression analysis
+for (attr in attributes) {
+  
+  # Count the number of non-empty samples (not NA and not an empty string)
+  non_empty_count <- sum(!is.na(data[[attr]]) & data[[attr]] != "")
+  cat("Attribute:", attr, "\n")
+  cat("Number of non-empty samples:", non_empty_count, "\n")
+  
+  # Extract rows where the attribute is non-empty (and its corresponding strBlock)
+  subset_data <- data[!is.na(data[[attr]]) & data[[attr]] != "", ]
+  
+  # Build the linear regression formula (using backticks in case the attribute name contains spaces)
+  reg_formula <- as.formula(paste("`", attr, "` ~ block_numeric", sep = ""))
+  
+  # Fit the linear regression model: attribute as response, block_numeric as predictor
+  model <- lm(reg_formula, data = subset_data)
+  summ <- summary(model)
+  
+  # Extract and round intercept, slope, and R-squared to 2 digits
+  intercept <- round(coef(model)[1], 2)
+  slope <- round(coef(model)[2], 2)
+  r2 <- round(summ$r.squared, 2)
+  
+  # Predict the expected attribute value when block_numeric = 24 (i.e., D6)
+  predicted_value <- round(intercept + slope * 24, 2)
+  
+  # Output the regression results for the current attribute
+  cat("Regression model results:\n")
+  cat("  Intercept:", intercept, "\n")
+  cat("  Slope:", slope, "\n")
+  cat("  R²:", r2, "\n")
+  cat("  Predicted", attr, "at D6 (block_numeric = 24):", predicted_value, "\n")
+  cat("------------------------------------------\n\n")
+}
+
+```
+
+
