@@ -1,0 +1,190 @@
+---
+title: "Kanna's Replication Analysis"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: packages
+
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(tidyr)
+```
+
+```{r}
+# 读取数据
+data <- read_excel("Data/FinalDataSet.xlsx")
+
+data$Hosp <- as.factor(data$Hosp)
+
+# 计算各项平均值
+summary_table <- data %>%
+  group_by(Hosp) %>%
+  summarise(
+    Average_Medical = mean(medical, na.rm = TRUE),
+    Average_Clinical_Reasoning = mean(clinical_reasoning, na.rm = TRUE),
+    Average_Professionalism = mean(professionalism, na.rm = TRUE),
+    Average_Collaboration = mean(collaboration, na.rm = TRUE),
+    Average_Patient_Care = mean(patient_care, na.rm = TRUE),
+    Average_Procedural_Skills = mean(procedural, na.rm = TRUE),
+    Average_Oral_Communication = mean(oral, na.rm = TRUE),
+    Average_Written_Communication = mean(written, na.rm = TRUE)
+  )
+
+# 计算差值（Hosp == 1 - Hosp == 0）
+differ_row <- summary_table[2, -1] - summary_table[1, -1] 
+differ_row <- cbind(Hosp = "Differ", differ_row) # 添加Hosp列标识为 "Differ"
+
+# p-value 计算
+test_variables <- c("medical", "clinical_reasoning", "professionalism", 
+                    "collaboration", "patient_care", "procedural", 
+                    "oral", "written")
+
+# 确保变量存在于数据集中
+test_variables <- test_variables[test_variables %in% colnames(data)]
+
+# 计算 t 检验的 p-value
+p_values <- sapply(test_variables, function(var) {
+  t_test <- t.test(data[[var]] ~ data$Hosp, var.equal = TRUE)
+  t_test$p.value
+})
+
+# 转换为数据框格式并匹配 summary_table 结构
+p_value_row <- as.data.frame(t(p_values))  # 转置为一行
+colnames(p_value_row) <- colnames(summary_table)[-1]  # 让列名匹配 summary_table
+p_value_row <- cbind(Hosp = "P_Value", p_value_row)  # 添加 Hosp 列
+
+# 确保所有数据框的列名一致
+common_cols <- colnames(summary_table)
+p_value_row <- p_value_row[, common_cols, drop = FALSE]
+
+# 合并表格
+summary_table <- rbind(summary_table, differ_row, p_value_row)
+
+summary_table <- summary_table %>%
+  mutate(across(-Hosp, ~ format(.x, scientific = FALSE, digits = 4)))
+
+# 打印最终表格
+print(summary_table)
+
+```
+
+```{r}
+
+
+
+data$Hosp <- as.factor(data$Hosp)
+
+summary_table <- data %>%
+  group_by(Hosp) %>%
+  summarise(
+    Average_Medical = mean(medical, na.rm = TRUE),
+    Average_Clinical_Reasoning = mean(clinical_reasoning, na.rm = TRUE),
+    Average_Professionalism = mean(professionalism, na.rm = TRUE),
+    Average_Collaboration = mean(collaboration, na.rm = TRUE),
+    Average_Patient_Care = mean(patient_care, na.rm = TRUE),
+    Average_Procedural_Skills = mean(procedural, na.rm = TRUE),
+    Average_Oral_Communication = mean(oral, na.rm = TRUE),
+    Average_Written_Communication = mean(written, na.rm = TRUE)
+  )
+
+differ_row <- summary_table[2, -1] - summary_table[1, -1] 
+differ_row <- cbind(Hosp = "Differ", differ_row) 
+
+test_variables <- c("medical", "clinical_reasoning", "professionalism", 
+                    "collaboration", "patient_care", "procedural", 
+                    "oral", "written")
+
+test_variables <- test_variables[test_variables %in% colnames(data)]
+
+p_values <- sapply(test_variables, function(var) {
+  t_test <- t.test(data[[var]] ~ data$Hosp, var.equal = TRUE)
+  t_test$p.value
+})
+
+p_value_row <- as.data.frame(t(p_values))  
+colnames(p_value_row) <- colnames(summary_table)[-1]  
+p_value_row <- cbind(Hosp = "P_Value", p_value_row) 
+
+common_cols <- colnames(summary_table)
+p_value_row <- p_value_row[, common_cols, drop = FALSE]
+
+summary_table <- rbind(summary_table, differ_row, p_value_row)
+
+summary_table <- summary_table %>%
+  mutate(across(-Hosp, ~ format(.x, scientific = FALSE, digits = 4)))
+
+print(summary_table)
+
+```
+
+```{r}
+
+# Take the transpose of the summary_table 
+t(summary_table)
+
+
+```
+
+```{r}
+
+# Append linear regression coefficients 
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+data$time<- label_mapping[data$strBlock]
+medical.lm.fit <- lm(medical~time, data = data)
+clinical.lm.fit <- lm(clinical_reasoning~time, data= data)
+prof.lm.fit <- lm(professionalism~time,data = data)
+colab.lm.fit <- lm(collaboration~time, data = data) 
+patient_care.lm.fit <- lm(patient_care~time,data=data) 
+procedural.lm.fit <- lm(procedural~time,data=data)
+oral.lm.fit <- lm(oral~time,data = data)
+written.lm.fit <- lm(written~time,data = data)
+
+# Extract the slope from each model
+lm_list <- list(medical.lm.fit, clinical.lm.fit, prof.lm.fit, colab.lm.fit, 
+                patient_care.lm.fit, procedural.lm.fit, oral.lm.fit, written.lm.fit)
+
+# Extract the slope from each model (assuming each model has only one predictor plus an intercept)
+slopes <- c()
+for(model in lm_list) {
+  slopes <- c(slopes, as.numeric(coef(model)[2]))
+}
+
+# Add the slopes as a row 
+
+
+
+
+
+```
+
+```{r}
+df <- data.frame(
+  Category = c("Medical Knowledge",
+               "Clinical Reasoning and Decision Making",
+               "Professionalism",
+               "Collaboration, Teamwork, and Interpersonal Skills",
+               "Patient Care, Assessment, and Management",
+               "Procedural Skills",
+               "Oral Client Communication",
+               "Written Communication"),
+  Non_Hospital_Employee_Avg = c(3.28, 3.30, 4.28, 4.33, 3.78, 3.38, 3.79, 3.58),
+  Hospital_Employee_Avg = c(3.40, 3.43, 4.41, 4.44, 3.94, 3.51, 3.84, 3.71),
+  Difference = c(0.123, 0.123, 0.124, 0.107, 0.153, 0.126, 0.052, 0.132),
+  P_Value = c(0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.21, 0.00),
+  Slope = c(0.033, 0.038, 0.024, 0.021, 0.036, 0.035, 0.037, 0.037)
+)
+
+df$Slope <- slopes
+df$Rotations_Saved <- df$Difference/df$Slope
+df$Rotations_Saved
+```

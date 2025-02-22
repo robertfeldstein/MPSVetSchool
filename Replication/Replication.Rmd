@@ -18,7 +18,7 @@ library(openxlsx)
 Load in the dataset
 ```{r}
 # Open the dataset
-df <- read.xlsx("../Data/FinalDataSet.xlsx")
+df <- read.xlsx("Data/FinalDataSet.xlsx")
 ```
 
 ## Entrustment Score Distribution
@@ -55,7 +55,7 @@ ggplot(data = data.frame(score = all_scores), aes(x = score)) +
 
 ```{r}
 # Test linear regression
-sample_df <- df[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")]
+sample_df <- df[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care", "Average", "procedural", "oral", "written")]
 
 # Categorical Model
 cat.fit <- lm(medical ~ strBlock, data = sample_df)
@@ -63,7 +63,6 @@ cat.fit <- lm(medical ~ strBlock, data = sample_df)
 
 # Linear Model
 # Convert strBlock to numeric 
-length(unique(sample_df$strBlock))
 
 labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
             "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
@@ -78,32 +77,48 @@ sample_df$strBlockint<- label_mapping[sample_df$strBlock]
 
 # Make medical linear regression
 lm.fit.medical <- lm(medical ~ strBlockint, data = sample_df)
-summary(lm.fit.medical)
+
 
 # Make clinical reasoning linear regression
 lm.fit.clinical_reasoning <- lm(clinical_reasoning ~ strBlockint, data = sample_df)
-summary(lm.fit.clinical_reasoning)
+
 
 # Make professionalism linear regression
 lm.fit.professionalism <- lm(professionalism ~ strBlockint, data = sample_df)
-summary(lm.fit.professionalism)
+
 
 # Make collaboration linear regression
 lm.fit.collaboration <- lm(collaboration ~ strBlockint, data = sample_df)
-summary(lm.fit.collaboration)
+
 
 # Make patient care linear regression
 lm.fit.patient_care <- lm(patient_care ~ strBlockint, data = sample_df)
-summary(lm.fit.patient_care)
+
+
+# Procedural
+lm.fit.procedural <- lm(procedural ~ strBlockint, data = sample_df)
+
+# Oral
+
+lm.fit.oral <- lm(oral ~ strBlockint, data = sample_df)
+
+# Written
+
+lm.fit.written <- lm(written ~ strBlockint, data = sample_df)
+
+# Overall
+
+lm.fit.average <- lm(Average ~ strBlockint, data = sample_df)
 
 
 ```
+
 ```{r}
 # Get the 25th percentile and 10th percentile of each of the scores
 
 # Manipulating Time
 
-columns <- c("medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")
+columns <- c("Average", "medical", "clinical_reasoning",  "patient_care", "procedural", "oral", "written")
 percentiles <- c(0.25, 0.10)
 nmat <- matrix(NA, nrow = length(columns), ncol = length(percentiles))
 
@@ -120,13 +135,42 @@ nmat
 
 ```
 
-
-
-
 ```{r}
-# Make residual plots for each of the scores
-# Medical residual plot
-plot(lm.fit.medical, which = 1)
+# How long does it take for 75% of the population to reach a score of 4?
+
+# Make a function that computes these confidence intervals a bunch of times
+
+compute_time <- function(target_score, lm.fit) {
+  beta_0 <- coef(lm.fit)[1]  # Intercept
+  beta_1 <- coef(lm.fit)[2]  # Slope
+  
+  # Compute the estimated time
+  estimated_time <- (target_score - beta_0) / beta_1
+  se_beta <- summary(lm.fit)$coefficients[, 2]
+  
+  # Approximate standard error of estimated time using propagation formula
+  se_time <- sqrt((se_beta[1] / beta_1)^2 + (se_beta[2] * (target_score - beta_0) / beta_1^2)^2)
+  
+  # Compute 95% confidence interval
+  time_lwr <- estimated_time - 1.96 * se_time
+  time_upr <- estimated_time + 1.96 * se_time
+  
+  return(c(estimated_time, time_lwr, time_upr,beta_1))
+}
+
+regression_models <- list(lm.fit.average, lm.fit.medical,
+  lm.fit.clinical_reasoning, lm.fit.patient_care, lm.fit.procedural, lm.fit.oral, lm.fit.written)
+
+times <- matrix(NA, nrow = length(regression_models), ncol = 4)
+
+for (i in 1:length(regression_models)) {
+  times[i, ] <- compute_time(4, regression_models[[i]])
+}
+
+# Rename the rows and columns
+rownames(times) <- c("Average", "Medical", "Clinical Reasoning", "Patient Care", "Procedural", "Oral", "Written")
+colnames(times) <- c("Estimated Time", "Lower Bound", "Upper Bound", "Slope")
+times
 
 
 ```
@@ -266,9 +310,6 @@ t.test(Average ~ Hosp, data = df2, var.equal = FALSE )
 #highly significant!
 ```
 
-robbie-work
-
-
 
 ## Comparison of Entrustment Scores Between Students Who Compeleted Introductory Rotation Courses vs Those Who Didn't
 ```{r}
@@ -318,4 +359,3 @@ t.test(Average ~ Early, data = df3, var.equal = FALSE )
 
 #no significant difference
 ```
-main
