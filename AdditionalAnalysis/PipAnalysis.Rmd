@@ -26,7 +26,7 @@ library(lubridate)
 
 ```{r, include = FALSE}
 # Load in the Dataset
-df <- read.xlsx("Data/FinalDataSet.xlsx")
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
 
 # Create a time column
 
