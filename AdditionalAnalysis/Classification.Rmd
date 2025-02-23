@@ -1,0 +1,17 @@
+---
+title: "Classification"
+author: "MPS Group 11"
+date: "2025-02-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(openxlsx)
+library(dplyr)
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
+```
+
