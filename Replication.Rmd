@@ -1,0 +1,310 @@
+---
+title: "Replication"
+author: "Robert Feldstein, Melissa Eckert, Yue Li, Kanna Chen"
+date: "2025-02-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+
+```
+
+Load in the dataset
+```{r}
+# Open the dataset
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
+```
+
+## Entrustment Score Distribution
+
+```{r}
+
+score_columns <- colnames(df)[4:16]
+# Store all of the scores in a single vector
+all_scores <- c(rep(NA, length(score_columns)))
+for (i in 1:length(score_columns)) {
+  all_scores <- c(all_scores, df[[score_columns[i]]])
+}
+
+# Remove NA values 
+all_scores <- all_scores[!is.na(all_scores)]
+
+mean_score <- mean(all_scores)
+
+# Add the mean of the score as text to the plot
+ggplot(data = data.frame(score = all_scores), aes(x = score)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black") +
+  labs(title = "Distribution of Entrustment Scores",
+       x = "Entrustment Score",
+       y = "Frequency") +
+  theme_minimal() +
+  geom_vline(xintercept = mean_score, color = "blue") +
+  annotate("text", x = 1, y = 7000, label = paste("Mean Score: ", round(mean_score, 2))) +
+  annotate("text", x = 1.5, y = 6000, label = paste("Total Observations: ", length(all_scores)))
+
+
+
+
+```
+
+```{r}
+# Test linear regression
+sample_df <- df[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")]
+
+# Categorical Model
+cat.fit <- lm(medical ~ strBlock, data = sample_df)
+
+
+# Linear Model
+# Convert strBlock to numeric 
+length(unique(sample_df$strBlock))
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+sample_df$strBlockint<- label_mapping[sample_df$strBlock]
+
+
+# Make medical linear regression
+lm.fit.medical <- lm(medical ~ strBlockint, data = sample_df)
+summary(lm.fit.medical)
+
+# Make clinical reasoning linear regression
+lm.fit.clinical_reasoning <- lm(clinical_reasoning ~ strBlockint, data = sample_df)
+summary(lm.fit.clinical_reasoning)
+
+# Make professionalism linear regression
+lm.fit.professionalism <- lm(professionalism ~ strBlockint, data = sample_df)
+summary(lm.fit.professionalism)
+
+# Make collaboration linear regression
+lm.fit.collaboration <- lm(collaboration ~ strBlockint, data = sample_df)
+summary(lm.fit.collaboration)
+
+# Make patient care linear regression
+lm.fit.patient_care <- lm(patient_care ~ strBlockint, data = sample_df)
+summary(lm.fit.patient_care)
+
+
+```
+```{r}
+# Get the 25th percentile and 10th percentile of each of the scores
+
+# Manipulating Time
+
+columns <- c("medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care")
+percentiles <- c(0.25, 0.10)
+nmat <- matrix(NA, nrow = length(columns), ncol = length(percentiles))
+
+for (i in 1:length(columns)) {
+  for (j in 1:length(percentiles)) {
+    nmat[i, j] <- quantile(df[[columns[i]]], probs = percentiles[j], na.rm=T)
+  }
+}
+
+rownames(nmat) <- columns
+colnames(nmat) <- paste0(percentiles * 100, "%")
+nmat
+
+
+```
+
+
+
+
+```{r}
+# Make residual plots for each of the scores
+# Medical residual plot
+plot(lm.fit.medical, which = 1)
+
+
+```
+
+
+```{r}
+
+# Comparison of Medical Knowledge Regression Curves with Respect to Professional Improvement Plans
+
+# Group 1: Students who never joined a PIP up to block ? 
+
+# Group 2: Students prior to joining a PIP at block?
+
+# Group 3: Students who never joined a PIP after block ?
+
+# Group 4: Students after joining a PIP at block ?
+
+comparison <- df[,c("UniqueID", "strBlock", "medical", "PIPYN", "PIPActive")]
+comparison$time<- label_mapping[comparison$strBlock]
+grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPActive))
+
+barplot(grouped$`sum(PIPActive)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Active by Block", xlab = "Block", ylab = "Number of Students")
+
+
+```
+
+```{r}
+# We'd really like to make a column called "PIPStart" that is 1 if the student started a PIP in that block and 0 otherwise
+
+comparison <- comparison %>% group_by(UniqueID) %>% mutate(PIPStart = ifelse(PIPActive == 1 & lag(PIPActive) == 0, 1, 0))
+
+# Now make a bar chart of the number of students who started a PIP in each block
+grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPStart))
+
+barplot(grouped$`sum(PIPStart)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Start by Block", xlab = "Block", ylab = "Number of Students")
+
+
+```
+
+
+## Fixed Effects Model
+
+```{r}
+# What is the best way to analyze the PIP data with student scores, given that students start PIPs at different times?
+
+library(fixest) # panel regression
+
+model <- feols(medical ~ PIPActive | UniqueID + strBlock, data = comparison)
+
+summary(model)
+
+
+
+```
+
+
+Students who joined a PIP are exected to have improved their medical scores by 0.088 points compared to had they not joined a PIP. This is not statistically significant at a 0.05 level. The test suggests that PIPs marginally improved student scores, but the test's results cannot be considered statistically significant. 
+
+
+```{r}
+ggplot(df, aes(x = factor(medical), fill = factor(PIPActive))) +
+  geom_bar(position = "fill") +
+  labs(x = "Score", y = "Proportion", fill = "PIP Active") +
+  theme_minimal()
+```
+
+
+```{r}
+library(MASS)
+
+# Convert score to an ordered factor
+df$medical <- factor(df$medical, levels = 1:5, ordered = TRUE)
+
+# Fit ordinal logistic regression
+model <- polr(medical ~ PIPActive, data = df, Hess = TRUE)
+
+# Summary of model
+summary(model)
+
+# Get odds ratios
+exp(coef(model))
+
+```
+
+## Comparison of Entrustment Scores between Student Employees & Student Non-employees
+```{r}
+#simple linear regression
+df2<- df |>
+  select(strBlock, Hosp, Average) |>
+  mutate(Hosp = factor(Hosp, labels = c("No Hospital Job", "Hospital Job")))
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# convert strBlock column to integers
+df2$strBlockint<- label_mapping[df2$strBlock]
+
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Hosp, data = df2)
+summary(fit)
+
+#Considering strBlock as a predictor
+fit2<- lm(Average ~ Hosp + strBlockint, data = df2)
+
+
+#strBlock * Hosp interaction term
+fit3<- lm(Average ~ Hosp * strBlockint, data = df2)
+
+
+df2 |>
+  group_by(strBlock, Hosp) |>
+  summarize(hosp_entrustment_score = mean(Average))|>
+ggplot(aes(x = strBlock, y = hosp_entrustment_score, color = Hosp)) + 
+  geom_point() +
+  geom_smooth(method = "lm",se = FALSE, aes(group = Hosp)) +
+  scale_y_continuous(limits = c(1,5) ) +
+  scale_color_manual(values = c("red", "blue")) +
+  labs(title = "Comparison of Entrustment Scores Between Student Employees 
+       & Student Non-Employees", x = "Rotation Block",
+       y = "Entrustment Score", color = "Mean by Rotation") + 
+  theme_minimal()
+```
+```{r}
+#t-test to compare means between the two groups 
+t.test(Average ~ Hosp, data = df2, var.equal = FALSE )
+
+#highly significant!
+```
+
+## Comparison of Entrustment Scores Between Students Who Compeleted Introductory Rotation Courses vs Those Who Didn't
+```{r}
+#simple linear regression
+df3<- df |>
+  select(strBlock, Early, Average) |>
+  mutate(Early = factor(Early, labels = c("No Introductory Course", "Introductory Rotation Course")))
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# convert strBlock column to integers
+df3$strBlockint<- label_mapping[df3$strBlock]
+
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Early, data = df3)
+summary(fit)
+
+#Considering strBlock as a predictor
+fit2<- lm(Average ~ Early + strBlockint, data = df3)
+
+
+#strBlock * Hosp interaction term
+fit3<- lm(Average ~ Early * strBlockint, data = df3)
+
+
+df3 |>
+  group_by(strBlock, Early) |>
+  summarize(early_entrustment_score = mean(Average))|>
+ggplot(aes(x = strBlock, y = early_entrustment_score, color = Early)) + 
+  geom_point() +
+  geom_smooth(method = "lm",se = FALSE, aes(group = Early)) +
+  scale_y_continuous(limits = c(1,5) ) +
+  scale_color_manual(values = c("red", "blue")) + 
+    labs(title = "Comparison of Entrustment Scores Between Students Who
+       Completed Introductory Rotations vs Those Who Did Not", x = "Rotation Block",
+       y = "Entrustment Score", color = "Mean by Rotation") +
+  theme_minimal()
+```
+```{r}
+#t-test to compare means between the two groups 
+t.test(Average ~ Early, data = df3, var.equal = FALSE )
+
+#no significant difference
+```
