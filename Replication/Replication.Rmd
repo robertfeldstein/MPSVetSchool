@@ -136,7 +136,6 @@ nmat
 ```
 
 ```{r}
-# How long does it take for 75% of the population to reach a score of 4?
 
 # Make a function that computes these confidence intervals a bunch of times
 
@@ -176,90 +175,6 @@ times
 ```
 
 
-```{r}
-
-# Comparison of Medical Knowledge Regression Curves with Respect to Professional Improvement Plans
-
-# Group 1: Students who never joined a PIP up to block ? 
-
-# Group 2: Students prior to joining a PIP at block?
-
-# Group 3: Students who never joined a PIP after block ?
-
-# Group 4: Students after joining a PIP at block ?
-
-comparison <- df[,c("UniqueID", "strBlock", "medical", "PIPYN", "PIPActive")]
-comparison$time<- label_mapping[comparison$strBlock]
-grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPActive))
-
-barplot(grouped$`sum(PIPActive)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Active by Block", xlab = "Block", ylab = "Number of Students")
-
-
-```
-
-```{r}
-# We'd really like to make a column called "PIPStart" that is 1 if the student started a PIP in that block and 0 otherwise
-
-comparison <- comparison %>% group_by(UniqueID) %>% mutate(PIPStart = ifelse(PIPActive == 1 & lag(PIPActive) == 0, 1, 0))
-
-# Now make a bar chart of the number of students who started a PIP in each block
-grouped <- comparison %>% group_by(strBlock) %>% summarise(sum(PIPStart))
-
-barplot(grouped$`sum(PIPStart)`, names.arg = grouped$strBlock, col = "blue", main = "PIP Start by Block", xlab = "Block", ylab = "Number of Students")
-
-
-```
-
-
-## Fixed Effects Model
-
-```{r}
-# What is the best way to analyze the PIP data with student scores, given that students start PIPs at different times?
-
-library(fixest) # panel regression
-
-model <- feols(medical ~ PIPActive | UniqueID + strBlock, data = comparison)
-
-summary(model)
-
-
-
-```
-
-
-Students who joined a PIP are exected to have improved their medical scores by 0.088 points compared to had they not joined a PIP. This is not statistically significant at a 0.05 level. The test suggests that PIPs marginally improved student scores, but the test's results cannot be considered statistically significant. 
-
-
-```{r}
-ggplot(df, aes(x = factor(medical), fill = factor(PIPActive))) +
-  geom_bar(position = "fill") +
-  labs(x = "Score", y = "Proportion", fill = "PIP Active") +
-  theme_minimal()
-```
-
-
-## Are PIPs Effective?
-
-First start by assuming that most PIPs start in A7. 
-
-```{r}
-
-# The Research Question would be as Follows 
-# Would students enrolled in a PIP have lower scores than had they not enrolled in a PIP?
-library(fixest)
-
-
-# Make a column called Post which is after A7
-
-df$Post <- df$strBlockInt
-
-
-did_model <- feols(Average ~ PIPYN * PIPActive | UniqueID + service + Hosp, data = df)
-summary(did_model)
-
-
-
-```
 
 ## Comparison of Entrustment Scores between Student Employees & Student Non-employees
 ```{r, fig.height = 6, fig.width = 8}

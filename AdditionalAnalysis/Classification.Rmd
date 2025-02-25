@@ -13,5 +13,52 @@ knitr::opts_chunk$set(echo = TRUE)
 library(openxlsx)
 library(dplyr)
 df <- read.xlsx("../Data/FinalDataSet.xlsx")
+# Add the time column 
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df$time<- label_mapping[df$strBlock]
 ```
+
+## Basic Classification
+
+The goal of this classifier is to use certain binary variables to determine the probability that a student's score is at least a 4 by time block D6. For now we will use Average score, but this model should be usable for any score. 
+
+
+```{r}
+
+# Predictive variables 
+binary_vars <- c("Hosp", "Early", "PIPYN")
+
+# Subset the dataset to only include rows where time = 25
+df_time25 <- df %>% filter(time == 25)
+
+df_time25$target <- ifelse(df_time25$Average >= 4, 1, 0)
+target_var <- "target"
+
+# Create a logistic regression model
+model <- glm(paste(target_var, "~", paste(binary_vars, collapse = " + ")), data = df_time25, family = "binomial")
+
+# Get the predicted probabilities
+df_time25$pred <- predict(model, type = "response")
+
+# Get the predicted classes
+df_time25$pred_class <- ifelse(df_time25$pred >= 0.5, 1, 0)
+
+summary(model)
+
+# Get accuracy 
+accuracy <- mean(df_time25$pred_class == df_time25$target)
+
+```
+
+
+
+
+
 
