@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(readxl)
 
 # Read the Excel file
-data <- read_excel("FinalDataSet.xlsx")
+data <- read_excel("../Data/FinalDataSet.xlsx")
 
 # Function to convert a strBlock (e.g., "A1", "D6") to a numeric time value (A1=1, D6=24)
 convertBlock <- function(block) {
@@ -62,6 +62,9 @@ for (attr in attributes) {
   slope <- round(coef(model)[2], 2)
   r2 <- round(summ$r.squared, 2)
   
+  # Get the significance level of the slope
+  p_value <- summ$coefficients[2, 4]
+  
   # Predict the expected attribute value when block_numeric = 24 (i.e., D6)
   predicted_value <- round(intercept + slope * 24, 2)
   
@@ -69,6 +72,7 @@ for (attr in attributes) {
   cat("Regression model results:\n")
   cat("  Intercept:", intercept, "\n")
   cat("  Slope:", slope, "\n")
+  cat("  Significance (p-value) of the slope:", p_value, "\n")
   cat("  R²:", r2, "\n")
   cat("  Predicted", attr, "at D6 (block_numeric = 24):", predicted_value, "\n")
   cat("------------------------------------------\n\n")
