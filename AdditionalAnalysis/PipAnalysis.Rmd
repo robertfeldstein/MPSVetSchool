@@ -225,7 +225,7 @@ print(staggered_notyettreated_plot)
 # What is the best way to analyze the PIP data with student 
 # scores, given that students start PIPs at different times?
 
-model <- feols(Average ~ PIPActive | UniqueID + time, data = df)
+model <- feols(Average ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
 summary(model)
 
 ```
