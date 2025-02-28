@@ -172,6 +172,7 @@ cython_debug/
 
 # Private Dataset
 Data/FinalDataSet.xlsx
+Data/*
 
 # MacOS DS_Store
 .DS_Store
