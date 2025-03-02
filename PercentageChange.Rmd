@@ -1,0 +1,272 @@
+---
+title: "Percentage Change Regressions"
+author: "Robert Feldstein, Melissa Eckert"
+date: "2025-02-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear Regression
+
+We will be repeating a set of linear regressions performed by the client, 
+but with the expressed interest of examining the percentage change in scores.
+
+```{r}
+
+library(readxl)
+library(dplyr)
+df <- read_excel("../Data/FinalDataSet.xlsx")
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df$strBlockint<- label_mapping[df$strBlock]
+
+
+```
+
+```{r}
+
+# Make a simpler DF to look at the four main scoring categories
+
+base_df <- df[,c("UniqueID", "strBlock", "strBlockint", "medical", "clinical_reasoning", 
+                 "professionalism", "collaboration", "Hosp",
+                 "Early", "PIPYN", "PIPActive")]
+
+```
+
+
+
+```{r}
+# Original Linear regressions
+lm.medical <- lm(medical ~ strBlockint, data = base_df)
+summary(lm.medical)
+
+lm.clinical <- lm(clinical_reasoning ~ strBlockint, data = base_df)
+summary(lm.clinical)
+
+lm.professionalism <- lm(professionalism ~ strBlockint, data = base_df)
+summary(lm.professionalism)
+
+lm.collaboration <- lm(collaboration ~ strBlockint, data = base_df)
+summary(lm.collaboration)
+
+lm.patient_care <- lm(patient_care ~ strBlockint, data = df)
+summary(lm.patient_care)
+
+lm.procedural_skills <- lm(procedural ~ strBlockint, data = df)
+summary(lm.procedural_skills)
+
+lm.oral_comm <- lm(oral~ strBlockint, data = df)
+summary(lm.oral_comm)
+
+lm.written_comm <- lm(written ~ strBlockint, data = df)
+summary(lm.written_comm)
+
+
+lm.pop_care <- lm(animal_population ~ strBlockint, data = df)
+summary(lm.pop_care)
+
+lm.evidence <- lm(evidence ~ strBlockint, data = df)
+summary(lm.evidence)
+
+lm.financial <- lm(financial ~ strBlockint, data = df)
+summary(lm.financial)
+
+lm.public <- lm(public_health ~ strBlockint, data = df)
+summary(lm.public)
+
+lm.service <- lm(service_specific ~ strBlockint, data = df)
+summary(lm.service)
+
+
+```
+
+```{r}
+
+# Look at log changes in scores to be more easily comparable
+
+log.overall <- lm(log(Average) ~ strBlockint, data = df)
+summary(log.overall)
+
+log.medical <- lm(log(medical) ~ strBlockint, data = base_df)
+summary(log.medical)
+
+log.clinical <- lm(log(clinical_reasoning) ~ strBlockint, data = base_df)
+summary(log.clinical)
+
+log.professionalism <- lm(log(professionalism) ~ strBlockint, data = base_df)
+summary(log.professionalism)
+
+log.collaboration <- lm(log(collaboration) ~ strBlockint, data = base_df)
+summary(log.collaboration)
+
+log.patient_care <- lm(log(patient_care) ~ strBlockint, data = df)
+summary(log.patient_care)
+
+log.procedural_skills <- lm(log(procedural) ~ strBlockint, data = df)
+summary(log.procedural_skills)
+
+log.oral_comm <- lm(log(oral) ~ strBlockint, data = df)
+summary(log.oral_comm)
+
+log.written_comm <- lm(log(written) ~ strBlockint, data = df)
+summary(log.written_comm)
+
+log.pop_care <- lm(log(animal_population) ~ strBlockint, data = df)
+summary(log.pop_care)
+
+log.evidence <- lm(log(evidence) ~ strBlockint, data = df)
+summary(log.evidence)
+
+log.financial <- lm(log(financial) ~ strBlockint, data = df)
+summary(log.financial)
+
+log.public <- lm(log(public_health) ~ strBlockint, data = df)
+summary(log.public)
+
+log.service <- lm(log(service_specific) ~ strBlockint, data = df)
+summary(log.service)
+
+
+
+```
+
+```{r}
+# Collect all the coefficients and take their exponent to get the percentage change
+
+overall_pct <- (exp(coef(log.overall))[2]-1)*100
+med_pct <- (exp(coef(log.medical))[2]-1)*100
+cli_pct <- (exp(coef(log.clinical))[2]-1)*100
+pro_pct <- (exp(coef(log.professionalism))[2]-1)*100
+col_pct <- (exp(coef(log.collaboration))[2]-1)*100
+pat_pct <- (exp(coef(log.patient_care))[2]-1)*100
+proc_pct <- (exp(coef(log.procedural_skills))[2]-1)*100
+oral_pct <- (exp(coef(log.oral_comm))[2]-1)*100
+writ_pct <- (exp(coef(log.written_comm))[2]-1)*100
+pop_pct <- (exp(coef(log.pop_care))[2]-1)*100
+evid_pct <- (exp(coef(log.evidence))[2]-1)*100
+fin_pct <- (exp(coef(log.financial))[2]-1)*100
+pub_pct <- (exp(coef(log.public))[2]-1)*100
+serv_pct <- (exp(coef(log.service))[2]-1)*100
+
+pcts <- c(overall_pct, med_pct, cli_pct, pro_pct, col_pct, pat_pct, proc_pct, oral_pct, writ_pct, pop_pct, evid_pct, fin_pct, pub_pct, serv_pct)
+
+# Collect information on the intercept terms
+
+overall_int <- exp(coef(log.overall))[1]
+med_int <- exp(coef(log.medical))[1]
+cli_int <- exp(coef(log.clinical))[1]
+pro_int <- exp(coef(log.professionalism))[1]
+col_int <- exp(coef(log.collaboration))[1]
+pat_int <- exp(coef(log.patient_care))[1]
+proc_int <- exp(coef(log.procedural_skills))[1]
+oral_int <- exp(coef(log.oral_comm))[1]
+writ_int <- exp(coef(log.written_comm))[1]
+pop_int <- exp(coef(log.pop_care))[1]
+evid_int <- exp(coef(log.evidence))[1]
+fin_int <- exp(coef(log.financial))[1]
+pub_int <- exp(coef(log.public))[1]
+serv_int <- exp(coef(log.service))[1]
+
+
+ints <- c(overall_int,med_int, cli_int, pro_int, col_int, pat_int, proc_int, oral_int, writ_int, pop_int, evid_int, fin_int, pub_int, serv_int)
+
+# Calculate the expected final score for each category after 25 rotations
+# final = (1+rate)^25 * initial
+
+overall_final <- overall_int * (1 + overall_pct/100)^25
+med_final <- med_int * (1 + med_pct/100)^25
+cli_final <- cli_int * (1 + cli_pct/100)^25
+pro_final <- pro_int * (1 + pro_pct/100)^25
+col_final <- col_int * (1 + col_pct/100)^25
+pat_final <- pat_int * (1 + pat_pct/100)^25
+proc_final <- proc_int * (1 + proc_pct/100)^25
+oral_final <- oral_int * (1 + oral_pct/100)^25
+writ_final <- writ_int * (1 + writ_pct/100)^25
+pop_final <- pop_int * (1 + pop_pct/100)^25
+evid_final <- evid_int * (1 + evid_pct/100)^25
+fin_final <- fin_int * (1 + fin_pct/100)^25
+pub_final <- pub_int * (1 + pub_pct/100)^25
+serv_final <- serv_int * (1 + serv_pct/100)^25
+
+finals <- c(overall_final,med_final, cli_final, pro_final, col_final, pat_final, proc_final, oral_final, writ_final, pop_final, evid_final, fin_final, pub_final, serv_final)
+
+# Put this information into a table
+
+categories <- c("Overall", "Medical", "Clinical Reasoning", "Professionalism", "Collaboration", "Patient Care", "Procedural Skills", "Oral Communication", "Written Communication", "Population Health", "Evidence-based Medicine", "Financial Literacy", "Public Health", "Service Specific")
+
+pct_change <- data.frame("Category" = categories,
+                         "PercentageGrowthPerRotation" = pcts,
+                         "ExpectedStartingScore" = ints,
+                         "ExpectedFinalScore" = finals)                      
+
+pct_change <- pct_change %>% 
+ mutate_if(is.numeric, round,digits = 3)
+
+pct_change
+
+```
+
+Here we see by taking a log-transformation the medical and clinical reasoning score categories grow almost twice as quickly as scores in professionalism and collaboration. This is slightly different from the original linear regressions, which would not emphasize the difference in growth rates between the categories.
+
+
+```{r}
+# Convert this table to a nicer looking table
+library(kableExtra)
+pct_change %>%
+  kable("html") %>%
+  kable_styling("striped", full_width = F) %>% 
+  column_spec(1, bold = T) %>%
+  column_spec(2:4, width = "10%")
+
+```
+
+
+
+```{r}
+
+# Add %-change to the original table
+
+base_df <- base_df %>%
+  group_by(UniqueID) %>%  # Ensure percentage change is calculated within each student
+  mutate(medical_pct = (medical - lag(medical)) / lag(medical) * 100, 
+         clinical_pct = (clinical_reasoning - lag(clinical_reasoning)) / lag(clinical_reasoning) * 100,
+         professionalism_pct = (professionalism - lag(professionalism)) / lag(professionalism) * 100,
+         collaboration_pct = (collaboration - lag(collaboration)) / lag(collaboration) * 100)
+
+base_df <- base_df %>%
+  mutate(medical_pct = ifelse(is.na(medical_pct), 0, medical_pct),
+         clinical_pct = ifelse(is.na(clinical_pct), 0, clinical_pct),
+         professionalism_pct = ifelse(is.na(professionalism_pct), 0, professionalism_pct),
+         collaboration_pct = ifelse(is.na(collaboration_pct), 0, collaboration_pct))
+
+# Now do regressions on these percentage changes
+
+lm.medical_pct <- lm(medical_pct ~ strBlockint, data = base_df)
+summary(lm.medical_pct)
+
+lm.clinical_pct <- lm(clinical_pct ~ strBlockint, data = base_df)
+summary(lm.clinical_pct)
+
+lm.professionalism_pct <- lm(professionalism_pct ~ strBlockint, data = base_df)
+summary(lm.professionalism_pct)
+
+lm.collaboration_pct <- lm(collaboration_pct ~ strBlockint, data = base_df)
+summary(lm.collaboration_pct)
+
+
+
+
+```
+
+These regressions are not significant at all, and probably should be discarded.
+

@@ -193,16 +193,29 @@ label_mapping <- setNames(1:length(labels), labels)
 # convert strBlock column to integers
 df2$strBlockint<- label_mapping[df2$strBlock]
 
-#Without considering strBlock as a predictor
-fit<- lm(Average ~ Hosp, data = df2)
-summary(fit)
+#Introductory Rotation Students Only
+hospital_employees<- df2 |>
+  filter(Hosp =="Hospital Job")
+employees_fit<- lm(Average ~ strBlockint, data = hospital_employees)
+summary(employees_fit)
+#Non-Introductory Rotation Students Only
+non_hospital_employees<- df2 |>
+  filter(Hosp == "No Hospital Job")
+non_employees_fit<- lm(Average ~ strBlockint, data = non_hospital_employees)
+summary(non_employees_fit)
 
 #Considering strBlock as a predictor
 fit2<- lm(Average ~ Hosp + strBlockint, data = df2)
 summary(fit2)
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Hosp, data = df2)
+summary(fit)
+
+
 
 #strBlock * Hosp interaction term
 fit3<- lm(Average ~ Hosp * strBlockint, data = df2)
+
 
 
 hosp_plot<- df2 |>
@@ -232,7 +245,7 @@ t.test(Average ~ Hosp, data = df2, var.equal = FALSE )
 #simple linear regression
 df3<- df |>
   select(strBlock, Early, Average) |>
-  mutate(Early = factor(Early, labels = c("No Introductory Course", "Introductory Rotation Course")))
+  mutate(Early = factor(Early, labels = c("No Introductory Rotation Course", "Introductory Rotation Course")))
 
 labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
             "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
@@ -244,12 +257,25 @@ label_mapping <- setNames(1:length(labels), labels)
 # convert strBlock column to integers
 df3$strBlockint<- label_mapping[df3$strBlock]
 
-#Without considering strBlock as a predictor
-fit<- lm(Average ~ Early, data = df3)
+#Introductory Rotation Students Only
+rotation_students<- df3 |>
+  filter(Early =="Introductory Rotation Course")
+students_fit<- lm(Average ~ strBlockint, data = rotation_students)
+summary(students_fit)
+#Non-Introductory Rotation Students Only
+non_rotation_students<- df3 |>
+  filter(Early == "No Introductory Rotation Course")
+non_students_fit<- lm(Average ~ strBlockint, data = non_rotation_students)
+summary(non_students_fit)
+
 
 #Considering strBlock as a predictor
 fit2<- lm(Average ~ Early + strBlockint, data = df3)
 summary(fit2)
+#Without considering strBlock as a predictor
+fit<- lm(Average ~ Early, data = df3)
+
+
 
 #strBlock * Hosp interaction term
 fit3<- lm(Average ~ Early * strBlockint, data = df3)
