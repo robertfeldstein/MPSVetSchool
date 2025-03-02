@@ -1,17 +1,18 @@
 ---
 title: "Classification"
 author: "MPS Group 11"
-date: "r Sys.Date()"
+date: "3-11-25"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(openxlsx)
+library(pROC)
 ```
 
 ```{r}
-library(openxlsx)
-library(dplyr)
 df <- read.xlsx("../Data/FinalDataSet.xlsx")
 # Add the time column 
 labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
@@ -59,6 +60,7 @@ accuracy <- mean(df_time25$pred_class == df_time25$target)
 ## Competency Classification
 
 1,2, & 3 = Incompetent; 4 & 5 = Competent Encoded as 0 = Incompetent; 1 = Competent 
+Can rotation blocks predict whether a student is competent?
 
 Logistic Regression for all attributes
 ```{r}
@@ -87,7 +89,7 @@ for(i in 3:length(attributes)){
   attribute <- attributes[i]
   formula<- as.formula(paste(attribute, "~ strBlockint"))
   log_model<- glm(formula, family = "binomial", data = sample_df)
-  log_models[[attribute]]<- summary(log_model)
+  log_models[[attribute]]<- log_model
 }
 
 ```
@@ -109,7 +111,7 @@ for(i in 3:length(attributes)){
   attribute <- attributes[i]
   formula<- as.formula(paste(attribute, "~ Hosp + strBlockint"))
   log_model<- glm(formula, family = "binomial", data = hosp_df)
-  log_models_hosp[[attribute]]<- summary(log_model)
+  log_models_hosp[[attribute]]<- log_model
 }
 
 ```
@@ -131,9 +133,10 @@ for(i in 3:length(attributes)){
   attribute <- attributes[i]
   formula<- as.formula(paste(attribute, "~ Early + strBlockint"))
   log_model<- glm(formula, family = "binomial", data = early_df)
-  log_models_early[[attribute]]<- summary(log_model)
+  log_models_early[[attribute]]<-log_model
 }
 ```
+
 Logistic Regression for PIPs
 ```{r}
 #Whether or not a student was ever in a PIP
@@ -152,7 +155,7 @@ for(i in 3:length(attributes)){
   attribute <- attributes[i]
   formula<- as.formula(paste(attribute, "~ PIPYN + strBlockint"))
   log_model<- glm(formula, family = "binomial", data = pipyn_df)
-  log_models_pip[[attribute]]<- summary(log_model)
+  log_models_pip[[attribute]]<- log_model
 }
 ```
 ```{r}
@@ -172,7 +175,59 @@ for(i in 3:length(attributes)){
   attribute <- attributes[i]
   formula<- as.formula(paste(attribute, "~ PIPActive + strBlockint"))
   log_model<- glm(formula, family = "binomial", data = pipActive_df)
-  log_models_pip2[[attribute]]<- summary(log_model)
+  log_models_pip2[[attribute]]<- log_model
 }
+
+```
+
+ROC Curves, AOC, & Accuracy 
+```{r}
+#generate predictions and classes for desired variables
+pred_avg<-predict(log_models[["Average"]], type = "response")
+pred_labels_avg<- ifelse(pred_avg > 0.5, 1, 0)
+pred_medical<-predict(log_models[["medical"]], type = "response")
+pred_collaboration<-predict(log_models[["collaboration"]], type = "response")
+pred_clinical_reasoning<-predict(log_models[["clinical_reasoning"]], type = "response")
+pred_professionalism<-predict(log_models[["professionalism"]], type = "response")
+pred_hosp<-predict(log_models_hosp[["Average"]], type = "response")
+pred_labels_hosp<- ifelse(pred_hosp > 0.5, 1, 0)
+pred_early<-predict(log_models_early[["Average"]], type = "response")
+pred_labels_early<- ifelse(pred_early > 0.5, 1, 0)
+pred_pipyn<-predict(log_models_pip[["Average"]], type = "response")
+pred_labels_pipyn<- ifelse(pred_pipyn > 0.5, 1, 0)
+pred_pipActive<-predict(log_models_pip[["Average"]], type = "response")
+pred_labels_pipActive<- ifelse(pred_pipActive > 0.5, 1, 0)
+
+#generate ROC curves, AUC, and accuracy 
+
+#Average
+roc_average<- roc(sample_df$Average, pred_avg)
+plot(roc_average, col = "blue", main = "ROC Curve")
+auc_average<- auc(roc_average)
+accuracy_average<- mean(pred_labels_avg == sample_df$Average)
+
+#Hospital Employees
+roc_hosp<- roc(hosp_df$Average, pred_hosp)
+plot(roc_hosp, col = "blue", main = "ROC Curve with 'Hosp' ")
+auc_hosp<- auc(roc_hosp)
+accuracy_hosp<- mean(pred_labels_hosp == hosp_df$Average)
+
+#Introductory Rotation Students
+roc_early<- roc(early_df$Average, pred_early)
+plot(roc_early, col = "blue", main = "ROC Curve with 'Early'")
+auc_early<- auc(roc_early)
+accuracy_early<- mean(pred_labels_early == early_df$Average)
+
+#PIPYN
+roc_pipyn<- roc(pipyn_df$Average, pred_pipyn)
+plot(roc_pipyn, col = "blue", main = "ROC Curve with 'PIPYN'")
+auc_pipyn<- auc(roc_pipyn)
+accuracy_pipyn<- mean(pred_labels_pipyn == pipyn_df$Average)
+
+#PIPActive
+roc_pipActive<- roc(pipActive_df$Average, pred_pipActive)
+plot(roc_pipActive, col = "blue", main = "ROC Curve with 'PIPActive'")
+auc_pipActive<- auc(roc_pipActive)
+accuracy_pipActive<- mean(pred_labels_pipActive == pipActive_df$Average)
 
 ```
