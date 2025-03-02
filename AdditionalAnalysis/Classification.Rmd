@@ -1,7 +1,7 @@
 ---
 title: "Classification"
 author: "MPS Group 11"
-date: "2025-02-23"
+date: "r Sys.Date()"
 output: pdf_document
 ---
 
@@ -24,10 +24,7 @@ label_mapping <- setNames(1:length(labels), labels)
 # Convert strBlock column to integers
 df$time<- label_mapping[df$strBlock]
 ```
-Logistic Regressions for Student Competency
-1,2, & 3 = Incompetent; 4 & 5 = Competent Encoded as 0 = Incompetent; 1 = Competent 
 
-<<<<<<< Updated upstream
 ## Basic Classification
 
 The goal of this classifier is to use certain binary variables to determine the probability that a student's score is at least a 4 by time block D6. For now we will use Average score, but this model should be usable for any score. 
@@ -59,19 +56,10 @@ summary(model)
 accuracy <- mean(df_time25$pred_class == df_time25$target)
 
 ```
-Logistic Regressions for Student Competency
+## Competency Classification
+
 1,2, & 3 = Incompetent; 4 & 5 = Competent Encoded as 0 = Incompetent; 1 = Competent 
 
-
-<<<<<<< Updated upstream
-
-
-
-
-=======
-
-=======
->>>>>>> Stashed changes
 Logistic Regression for all attributes
 ```{r}
 labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
@@ -188,7 +176,3 @@ for(i in 3:length(attributes)){
 }
 
 ```
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
