@@ -1,0 +1,99 @@
+---
+title: "EDA"
+output: html_document
+date: ""
+---
+
+
+```{r cars}
+# Calculate the average number of procedures performed for each surgical category
+
+library(openxlsx)
+library(dplyr)
+library(ggplot2)
+
+# read in data
+
+df <- read.xlsx("../Data/Procedures.xlsx")
+
+category_avg <- df %>%
+  group_by(Category) %>%
+  summarise(Avg_Count = mean(count, na.rm = TRUE)) %>%
+  arrange(desc(Avg_Count))
+
+ggplot(category_avg, aes(x = reorder(Category, -Avg_Count), y = Avg_Count)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Average Procedure Count by Category")
+
+```
+
+
+
+```{r pressure, echo=FALSE}
+# Calculate the proportion of operations for each service code
+service_distribution <- df %>%
+  group_by(service) %>%
+  summarise(Total_Count = sum(count, na.rm = TRUE)) %>%
+  mutate(Percentage = Total_Count / sum(Total_Count) * 100)
+
+ggplot(service_distribution, aes(x = reorder(service, -Total_Count), y = Percentage)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Percentage of Procedures by Service Type")
+
+```
+```{r}
+# Calculate the total number of surgeries per student and plot the distribution
+student_counts <- df %>% group_by(Unique.ID) %>% summarise(Total_Procedures = sum(count, na.rm = TRUE))
+
+ggplot(student_counts, aes(x = Total_Procedures)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "black", alpha = 0.7) +
+  ggtitle("Distribution of Total Procedures Per Student") +
+  xlab("Total Procedures") +
+  ylab("Frequency")
+
+```
+
+```{r}
+# Analyze which students perform the most surgeries and find "efficient" vs. "low-efficiency" students.
+student_efficiency <- df %>%
+  group_by(Unique.ID) %>%
+  summarise(Total_Procedures = sum(count, na.rm = TRUE)) %>%
+  arrange(desc(Total_Procedures))
+ggplot(student_efficiency, aes(x = Unique.ID, y = Total_Procedures)) +
+  geom_point(color = "darkgreen", alpha = 0.7) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Total Procedures Performed by Each Student") +
+  xlab("Student ID") +
+  ylab("Total Procedures")
+
+```
+````{r}
+# Do all students cover a wide range of different surgeries, or do most only specialize in a few?
+student_skill_distribution <- df %>%
+  group_by(Unique.ID) %>%
+  summarise(Unique_Skills = n_distinct(Skill))
+
+ggplot(student_skill_distribution, aes(x = Unique_Skills)) +
+  geom_histogram(binwidth = 1, fill = "purple", color = "black", alpha = 0.7) +
+  ggtitle("Distribution of Unique Skills Performed by Students") +
+  xlab("Number of Unique Skills") +
+  ylab("Number of Students")
+
+````
+
+```{r}
+#Predicting which students are likely to have more surgeries.
+df$High_Procedures <- ifelse(df$count > 5, 1, 0)
+
+logit_model <- glm(High_Procedures ~ Unique.ID + service + Category, 
+                   data = df, 
+                   family = "binomial")
+
+summary(logit_model)
+
+```
+
+

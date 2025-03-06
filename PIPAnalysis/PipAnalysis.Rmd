@@ -27,6 +27,7 @@ library(lubridate)
 ```{r, include = FALSE}
 # Load in the Dataset
 df <- read.xlsx("../Data/FinalDataSet.xlsx")
+#df <- read.xlsx("../Data/2025Data.xlsx")
 
 # Create a time column
 
@@ -53,8 +54,16 @@ Prior to analyzing the PIP data, we would like to get some visualizations on whe
 ```{r}
 # We'd really like to make a column called "PIPStart" that is 1 if 
 # the student started a PIP in that block and 0 otherwise
+
+# df$PIPYN <- df$PIPOverall
+# df$PIPActive <- df$PIPPrePost
+
 comparison <- df[,c("UniqueID", "strBlock", "medical", "Average", 
                     "PIPYN", "PIPActive", "Hosp", "time")]
+
+
+
+
 comparison <- comparison %>% group_by(UniqueID) %>% 
   mutate(PIPStart = ifelse(PIPActive == 1 & lag(PIPActive) == 0, 1, 0))
 
@@ -91,6 +100,50 @@ The mosaic plot shows that students who are enrolled in PIPs are typically not e
 
 \newpage 
 
+## Basic Linear and Logistic Models
+
+```{r}
+model.medical_linear <- lm(medical ~ PIPYN*time+Hosp, data = df)
+summary(model.medical_linear)
+```
+
+This is just a simple linear regression; it does not try to measure the impact of PIPs amongst students before and after entering a PIP. It shows that students who are in PIPs on average have medical scores -0.34 points lower than that of other students, holding other variables constant.
+
+```{r}
+library(stats)
+# Logistic Regression Model
+model.medical_logistic <- glm(I(medical > 3) ~ PIPYN*time+Hosp , data = df, family = binomial(link = "logit"))
+summary(model.medical_logistic)
+
+```
+
+This logistic regression model attempts to classify competent medical scores from non-competent ones. The coefficients are log-odds, with a negative log-odd indicating that the presence of being in a PIP decreases the chance of having a competent medical score.
+
+
+```{r}
+library(MASS)
+
+pipdf <- df %>% filter(PIPYN==1)
+# Fit an ordinal regression model
+ord_model <- polr(as.factor(medical) ~ time + PIPActive, data = pipdf, method = "logistic")
+summary(ord_model)
+
+```
+
+```{r}
+library(lme4)
+
+# Fit a mixed-effects model
+model <- lmer(medical ~ time + PIPActive + (1 + time | UniqueID), data = pipdf)
+
+summary(model)
+
+```
+
+
+
+\newpage
+
 
 ## Difference in Difference Model: 
 
@@ -118,7 +171,7 @@ Post: The average difference in the score of students in the post-treatment peri
 
 ```{r}
 # What about controlling for hospital employment?
-
+df$Post <- ifelse(df$time > 6, 1, 0)
 didreg2 = lm(Average ~ PIPYN*Post + Hosp, data = df)
 summary(didreg2)
 ```
@@ -139,11 +192,17 @@ https://tilburgsciencehub.com/topics/analyze/causal-inference/did/staggered-did/
 
 
 ```{r}
-df <- df %>%
+# df <- df %>%
+#   group_by(UniqueID) %>%
+#   mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
+#   ungroup()
+# table(df$time, df$PIPStart)
+
+pipdf <- pipdf %>%
   group_by(UniqueID) %>%
   mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
   ungroup()
-table(df$time, df$PIPStart)
+table(pipdf$time, pipdf$PIPStart)
 
 ```
 
@@ -155,18 +214,18 @@ table(df$time, df$PIPStart)
 
 
 filtered <- df %>%
-  filter(!(PIPStart %in% c(5,12,15,17)))
+  filter(!(PIPStart %in% c(5,8)))
 
 
-
-staggered_nevertreated <- att_gt(yname = "Average", # outcome variable
+staggered_nevertreated <- att_gt(yname = "medical", # outcome variable
                                   tname = "time", # time variable
                                   idname = "UniqueID", # id variable
                                   gname = "PIPStart", # first treatment period variable
                                   control_group = "nevertreated", # set the comparison group as either "never treated" or "not yet treated"
                                   data = filtered, # data
                                   xformla = NULL, # add covariates here but it is set to default in this case
-                                  allow_unbalanced_panel = TRUE # indicate whether or not the function should balance with respect to time and id
+                                  allow_unbalanced_panel = T,
+                                 clustervars = c("UniqueID")# indicate whether or not the function should balance with respect to time and id
 )
 
 
@@ -228,6 +287,20 @@ print(staggered_notyettreated_plot)
 model <- feols(Average ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
 summary(model)
 
+# Do it again, but with a different dependent variable
+
+model.medical <- feols(medical ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.medical)
+
+model.clinical <- feols(clinical_reasoning ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.clinical)
+
+model.professional <- feols(professionalism ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.professional)
+
+model.collaboration <- feols(collaboration ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.collaboration)
+
 ```
 
 
@@ -237,25 +310,66 @@ Interpretation:
 
 Being enrolled in a PIP is associated with a 0.12 point increase in student scores. This is a statistically significant result, meaning that it is unlikely to have occurred by random chance. This result suggests that PIPs have a positive effect on student scores. However, it is important to note that this is an observational study, so we cannot say for certain that PIPs themselves caused the increase in scores. It is possible that another change, related to being placed into a PIP (such as increased support from faculty or more time spent studying), caused the increase in scores.
 
+
+An issue with fixed effects regression:
+
+It currently assumes that the difference between a 1 and a 2 is the same as the difference of a 3 and a 4. This is not necessarily true!
+
+
+Workaround: Conditional Fixed Effects Ordered Logit
+
 ```{r}
-# Some kind of visualization of the Fixed Effects Model 
+library(survival)
+df$medical_factor <- factor(df$medical, ordered = TRUE)
+# df$clinical_factor <- factor(df$clinical_reasoning, ordered = TRUE)
+# df$professional_factor <- factor(df$professionalism, ordered = TRUE)
+# df$collaboration_factor <- factor(df$collaboration, ordered = TRUE)
+
+# model.medical <- clogit(I(medical > 3) ~ PIPActive  + strata(UniqueID) + strata(time), data = df)
+# summary(model.medical)
 
 
-fe_values <- fixef(model)  # Extract fixed effects
+library(stats)
 
-# Convert to a data frame for visualization
-fe_df <- data.frame(
-  fe_id = unlist(fe_values),
-  group = rep(names(fe_values), lengths(fe_values))
-)
+model.medical <- glm(I(medical > 3) ~ PIPActive *time , data = df, family = binomial(link = "logit"))
 
-ggplot(fe_df, aes(x = fe_id)) +
-  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
-  facet_wrap(~ group, scales = "free") +
-  theme_minimal() +
-  labs(title = "Distribution of Fixed Effects", x = "Fixed Effect Estimate", y = "Count")
+model.medical <- lm(I(medical>3) ~ PIPYN*time, data = df)
+
+summary(model.medical)
+# model.clinical <- clogit(I(clinical_reasoning > 3) ~ PIPActive * time + strata(UniqueID), data = df)
+# summary(model.clinical)
+# 
+# model.professional <- clogit(I(professionalism > 3) ~ PIPActive * time + strata(UniqueID), data = df)
+# summary(model.professional)
+# 
+# model.collaboration <- clogit(I(collaboration > 3) ~ PIPActive * time + strata(UniqueID), data = df)
+# summary(model.collaboration)
 
 
 ```
+
+Note: This model does not say anything about students not placed into a PIP. It only compares the difference in scores between students before they enter a PIP and after they enter a PIP.
+
+When adding in time impacts, the PIPActive variable no longer is statistically significant at a 0.05 level. Not only that, but it is actually negative! This suggests that the PIPs may have a negative impact on student scores at time 0. However, looking at the interaction term (which also is not statistically significant) it would show that the impact of PIPS improves scores by about 3% greater every time unit. This would mean that PIPs become more effective over time. If we think about this logically, this makes sense. Students need time to adjust to the PIP and to see the benefits of it. In their first rotation there is no way they would see the same benefits as they would in their last rotation.
+
+
+```{r}
+
+# A correct way to do clustering
+library(sandwich)
+library(lmtest)
+# Calculate clustered standard errors
+cluster_se <- vcovCL(model.medical, cluster = ~ UniqueID)
+# Summarize the model using clustered standard errors
+summary_clustered <- coeftest(model.medical, vcov = cluster_se)
+print(summary_clustered)
+
+
+```
+Shows limited impacts of PIPs; the interaction effect is insignificant and even if it was we would not see a serious growth.
+
+There are potentially other ways of representing competency; visualize boxplots between PIPs and Not in a PIP. 
+
+
 
 
