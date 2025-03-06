@@ -1,0 +1,178 @@
+---
+title: "Procedure Data"
+author: "Robert Feldstein"
+date: "2025-02-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(openxlsx)
+library(dplyr)
+
+df <- read.xlsx("../Data/Procedures.xlsx", sheet = 1)
+df_new <- read.xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+# Rename df_new catalog column to be called service
+
+colnames(df_new)[colnames(df_new) == "catalog_number"] <- "service"
+colnames(df_new)[colnames(df_new) == "skill"] <- "Skill"
+colnames(df_new)[colnames(df_new) == "ID"] <- "Unique.ID"
+
+```
+
+
+```{r}
+# Potential Dataset issues 
+# Look at the NA rows
+
+missing<- df_new %>% filter(is.na(service) |service < 1000)
+
+# look just at castrations and ovariectomy
+
+important <- missing %>% filter(Skill == "Castration" | Skill == "Ovarioectomy/Ovariohysterectomy") 
+sum(important$service,na.rm=T)
+sum(important$total_number_performed,na.rm=T)
+
+# There are 250 rows where there is no service marked 
+
+# Check about total_number_performed being missing as well
+
+df_new %>% filter(is.na(total_number_performed))
+
+# 211 rows where it is just empty in the count
+
+
+```
+
+
+```{r}
+# Castration and Ovarioectomy are the most important 
+
+# Group by skill and get the count 
+
+df_new %>% group_by(Skill,grad_year) %>% summarise(Count = sum(total_number_performed)) %>% arrange(desc(Count))
+
+```
+
+Castration and Ovarioectomy are the most popular procedures. They will be important to track.
+
+
+
+```{r}
+# Group by skill and UniqueID
+
+df_new %>% group_by(Unique.ID, Skill) %>% summarise(Count = sum(total_number_performed))
+
+```
+
+This is an individual list of procedures performed by each student. 
+
+## Investigating Differences between 2024 and 2025 
+
+```{r}
+
+
+# How about sum of count column
+
+df_new %>% group_by(grad_year) %>% summarise(Count = sum(total_number_performed, na.rm = TRUE))
+
+```
+
+As known by our client, students did not log nearly as many procedures in 2024 as they did in 2025. This is largely because the procedural tracker was not introduced until January. There were essentally 5000 more procedures logged in 2025 than in 2024. 
+
+
+
+```{r}
+# Which services have the most surgeries?
+
+df_new %>% group_by(service,grad_year) %>% summarise(Count = sum(total_number_performed, na.rm = TRUE)) %>% arrange(desc(Count))
+
+```
+The class with the most surgeries is 5606.
+
+
+```{r}
+# What are the most popular categories of surgeries?
+
+df %>% group_by(Category) %>% summarise(Count = sum(count, na.rm = TRUE)) %>% arrange(desc(Count))
+
+# How many students have done each category of surgery?
+
+df %>% group_by(Category) %>% summarise(Count = n()) %>% arrange(desc(Count))
+
+
+```
+
+```{r}
+# Come up with some plots
+
+library(ggplot2)
+
+# Procedures by category sum, but break the colors into 2024 and 2025
+
+# ggplot(df, aes(x = Category, fill = Class)) + geom_bar() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Total Counts of Procedures for 2024 and 2025 (C6)")
+
+# Do the same but sum up the count column 
+df_new$grad_year <- as.factor(df_new$grad_year)
+
+ggplot(df_new, aes(x = skill_category, y = total_number_performed, fill = grad_year)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Total Counts of Procedures for 2024 and 2025 (C6)")
+
+
+
+```
+
+```{r}
+# Procedures by service, but break the colors into 2024 and 2025
+
+# ggplot(df, aes(x = service, fill = Class)) + geom_bar() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Procedures by Class for 2024 and 2025 (C6)")
+
+# Do this but sum the count
+
+df_new$service <- as.factor(df_new$service)
+
+ggplot(df_new, aes(x = service, y = total_number_performed, fill = grad_year)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Procedures by Class for 2024 and 2025 (C6)")
+
+```
+
+```{r}
+# Plot the distribution of the amount of procedures done by each student
+
+ggplot(df, aes(x = Unique.ID, y = count)) + geom_point() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+# Plot a distribution for each category
+
+ggplot(df, aes(x = Category, y = count)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+# Do a distribution by category for 2024 and 2025
+
+ggplot(df, aes(x = Category, y = count, fill = Class)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))  + ggtitle("Boxplots of Procedures by Category for 2024 and 2025 (C6)")
+
+
+
+```
+
+
+```{r}
+# Plot a barchart for the average number of procedures by category
+
+df %>% group_by(Category) %>% summarise(Avg = mean(count, na.rm = TRUE)) %>% ggplot(aes(x = Category, y = Avg)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Average Procedures by Category (C6)")
+
+```
+
+```{r}
+# Plot a barchart for the number of unique skills per student (e.g. how many students know 20 skills?)
+
+df %>% group_by(Unique.ID) %>% summarise(Count = n()) %>% ggplot(aes(x = Count)) + geom_bar() + ggtitle("Number of Unique Skills per Student (C6)")
+
+```
+
+
