@@ -1,0 +1,222 @@
+---
+title: "2025_Regression_and_Classification"
+author: "Robert Feldstein, Melissa Eckert"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Necessary Libraries
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+```
+
+## Data Cleaning & Importation
+
+```{r}
+# We need both the 2025 data, and the procedure data
+
+df25 <- read_xlsx("../Data/2025Data.xlsx", sheet = 1)
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# We need to aggregate the procedure data to the student level
+# For now, we will just look at Ovarioectomy/Ovariohysterectomy and Castration
+
+neuters <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  group_by(ID, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Rename neuters column names
+colnames(neuters) <- c("ID", "Total_Ov", "Total_Castration")
+
+# Make a skill_category dataset
+
+skill_cat <- dfproc %>%
+  group_by(ID, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Now we need to merge the two dataframes
+# Make a new column in df25 called TotalOv and TotalCa
+# It looks at the ID and then pulls the total from the neuters dataframe
+
+df25 <- df25 %>%
+  left_join(neuters, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    Total_Castration = replace_na(Total_Castration, 0),
+    Total_Ov = replace_na(Total_Ov, 0)
+  )
+
+# Now we need to merge the skill_cat dataframe
+
+df25 <- df25 %>%
+  left_join(skill_cat, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    `Total_Surgical Skills` = replace_na(`Total_Surgical Skills`, 0),
+    `Total_Procedural Skills` = replace_na(`Total_Procedural Skills`, 0),
+    `Total_Dental Skills` = replace_na(`Total_Dental Skills`, 0),
+    `Total_Anesthesia Skills` = replace_na(`Total_Anesthesia Skills`, 0)
+  )
+
+# Rename columns to add underscores
+df25 <- df25 %>%
+  rename_with(~str_replace_all(., " ", "_"))
+
+# Add time variable
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df25$time<- label_mapping[df25$strBlock]
+
+```
+
+
+```{r}
+
+# A slightly more difficult exercise 
+# Rather than selectively mapping the total number of procedures to the student,
+# we can map them overtime by merging the procedure to the course
+
+# E.g. a student completed 3 castrations in 5601, and then they took 5601 in block a3, then we can put a 3 there
+
+# Step 1: Attach course info to procedures before aggregation
+dfproc_course <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  select(ID, catalog_number, skill, total_number_performed)
+
+# Step 2: Aggregate by student (ID) and course (catalog_number)
+neuters <- dfproc_course %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+colnames(neuters) <- c("ID", "catalog_number", "Ov", "Castration")
+
+# Step 3: Merge with df25 (using both UniqueID and catalog_number)
+df25 <- df25 %>%
+  left_join(neuters, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Castration = replace_na(Castration, 0),
+    Ov = replace_na(Ov, 0)
+  )
+
+# Now ideally, we would make columns that are the total number of procedures performed up to that point
+
+df25$CastrationPerformed <- ave(df25$Castration, df25$UniqueID, FUN = cumsum)
+df25$OvPerformed <- ave(df25$Ov, df25$UniqueID, FUN = cumsum)
+
+# Repeat the same process for skill categories
+
+skill_cat <- dfproc %>%
+  group_by(ID, catalog_number, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
+
+df25 <- df25 %>% 
+  left_join(skill_cat, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    `Surgical Skills` = replace_na(`Surgical Skills`, 0),
+    `Procedural Skills` = replace_na(`Procedural Skills`, 0),
+    `Dental Skills` = replace_na(`Dental Skills`, 0),
+    `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
+  )
+
+
+# Sum the columns to get the total number of procedures performed up to that point
+
+df25$Surgical_Per <- ave(df25$`Surgical Skills`, df25$UniqueID, FUN = cumsum)
+df25$Procedural_Per <- ave(df25$`Procedural Skills`, df25$UniqueID, FUN = cumsum)
+df25$Dental_Per <- ave(df25$`Dental Skills`, df25$UniqueID, FUN = cumsum)
+df25$Anesthesia_Per <- ave(df25$`Anesthesia Skills`, df25$UniqueID, FUN = cumsum)
+
+
+
+```
+
+
+## Regression Models
+
+```{r}
+
+# Start with linear regression 
+
+lm.medical <- lm(medical ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, data = df25)
+summary(lm.medical)
+
+
+```
+
+```{r}
+
+lm.clinical <- lm(clinical_reasoning ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, data = df25)
+
+summary(lm.clinical)
+
+
+```
+
+Unfortunately, it does not appear to be the case that the new procedural data is significantly associated with scores. This could be due to the fact that we are working with an incomplete dataset. 
+
+
+```{r}
+# We can also do the standard time based linear regressions we did previously
+
+time_regression <- function(df, outcome) {
+  # Build the formula from the outcome string
+  fmla <- as.formula(paste(outcome, "~ time"))
+  fit <- lm(fmla, data = df)
+  sfit <- summary(fit)
+  
+  # Extract the intercept and its p-value
+  int_est <- coef(sfit)["(Intercept)", "Estimate"]
+  int_p   <- coef(sfit)["(Intercept)", "Pr(>|t|)"]
+  
+  # Extract the coefficient for time and its p-value
+  time_est <- coef(sfit)["time", "Estimate"]
+  time_p   <- coef(sfit)["time", "Pr(>|t|)"]
+  
+  return(c(Intercept = int_est, Intercept_p = int_p,
+           Time_coef = time_est, Time_p = time_p))
+}
+
+
+outcomes <- c("medical", "clinical_reasoning", "professionalism", "collaboration",
+              "patient_care", "procedural", "oral", "written", "animal_population",
+              "evidence", "financial", "public_health", "service_specific")
+
+# Build a table by applying time_regression to each outcome
+result_table <- do.call(rbind, lapply(outcomes, function(o) time_regression(df25, o)))
+result_table <- data.frame(Outcome = outcomes, result_table)
+result_table
+
+
+```
+
+
+## Classification Models
+
+```{r}
+# TODO: Add classification models :) have fun!
+```
+
