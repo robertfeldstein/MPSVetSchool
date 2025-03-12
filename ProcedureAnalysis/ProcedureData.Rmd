@@ -30,12 +30,6 @@ colnames(df_new)[colnames(df_new) == "ID"] <- "Unique.ID"
 
 missing<- df_new %>% filter(is.na(service) |service < 1000)
 
-# look just at castrations and ovariectomy
-
-important <- missing %>% filter(Skill == "Castration" | Skill == "Ovarioectomy/Ovariohysterectomy") 
-sum(important$service,na.rm=T)
-sum(important$total_number_performed,na.rm=T)
-
 # There are 250 rows where there is no service marked 
 
 # Check about total_number_performed being missing as well
@@ -43,9 +37,27 @@ sum(important$total_number_performed,na.rm=T)
 df_new %>% filter(is.na(total_number_performed))
 
 # 211 rows where it is just empty in the count
-
+# It is allowed to just replace these rows with zeros
 
 ```
+
+## Data Cleaning
+
+```{r}
+# First clean up service values that are less than 1000 by inserting them into the total_number_performed category
+df_new$service <- as.numeric(df_new$service)
+df_new <- df_new %>% mutate(total_number_performed = ifelse(service < 1000, service, total_number_performed))
+# Now set any service less than 1000 to "Missing"
+
+df_new <- df_new %>% mutate(service = ifelse(service < 1000 | is.na(service), "Missing", service))
+df_new$service <- as.factor(df_new$service)
+
+# Set any NA values in total_number_performed to zero
+
+df_new$total_number_performed[is.na(df_new$total_number_performed)] <- 0
+
+```
+
 
 
 ```{r}
@@ -97,11 +109,7 @@ The class with the most surgeries is 5606.
 ```{r}
 # What are the most popular categories of surgeries?
 
-df %>% group_by(Category) %>% summarise(Count = sum(count, na.rm = TRUE)) %>% arrange(desc(Count))
-
-# How many students have done each category of surgery?
-
-df %>% group_by(Category) %>% summarise(Count = n()) %>% arrange(desc(Count))
+df_new %>% group_by(skill_category,grad_year) %>% summarise(Total = sum(total_number_performed, na.rm = TRUE), Unique = n()) %>% arrange(desc(Total))
 
 
 ```
@@ -137,26 +145,18 @@ ggplot(df_new, aes(x = service, y = total_number_performed, fill = grad_year)) +
 
 ```
 
-```{r}
-# Plot the distribution of the amount of procedures done by each student
-
-ggplot(df, aes(x = Unique.ID, y = count)) + geom_point() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-```
 
 ```{r}
 # Plot a distribution for each category
 
-ggplot(df, aes(x = Category, y = count)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggplot(df_new, aes(x = skill_category, y = total_number_performed)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ```
 
 ```{r}
 # Do a distribution by category for 2024 and 2025
 
-ggplot(df, aes(x = Category, y = count, fill = Class)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))  + ggtitle("Boxplots of Procedures by Category for 2024 and 2025 (C6)")
-
-
+ggplot(df_new, aes(x = skill_category, y = total_number_performed, fill = grad_year)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, hjust = 1))  + ggtitle("Boxplots of Procedures by Category for 2024 and 2025 (C6)")
 
 ```
 
@@ -164,15 +164,55 @@ ggplot(df, aes(x = Category, y = count, fill = Class)) + geom_boxplot() + theme(
 ```{r}
 # Plot a barchart for the average number of procedures by category
 
-df %>% group_by(Category) %>% summarise(Avg = mean(count, na.rm = TRUE)) %>% ggplot(aes(x = Category, y = Avg)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Average Procedures by Category (C6)")
+df_new %>% group_by(skill_category) %>% summarise(Avg = mean(total_number_performed, na.rm = TRUE)) %>% ggplot(aes(x = skill_category, y = Avg)) + geom_bar(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + ggtitle("Average Procedures by Category (C6)")
 
 ```
+
+
+
+## Analysis of Neuters 
 
 ```{r}
-# Plot a barchart for the number of unique skills per student (e.g. how many students know 20 skills?)
+# There is a value to just looking at the castrations and ovariectomies between the populations
 
-df %>% group_by(Unique.ID) %>% summarise(Count = n()) %>% ggplot(aes(x = Count)) + geom_bar() + ggtitle("Number of Unique Skills per Student (C6)")
+neuters <- df_new %>% filter(Skill %in% c("Castration", "Ovarioectomy/Ovariohysterectomy"))
+
+# Group by grad_year and skill
+
+neuters %>% group_by(grad_year, Skill) %>% summarise(Count = sum(total_number_performed, na.rm = TRUE))
+
+# Make a histogram of the total number of neuters
+
+ggplot(neuters, aes(x = total_number_performed, fill = grad_year)) + geom_histogram(binwidth = 1) + ggtitle("Total Number of Neuters by Year (C6)")
+
+# Make a boxplot that breaks into castration and ovarioectomy
+
+ggplot(neuters, aes(x = Skill, y = total_number_performed, fill = grad_year)) + geom_boxplot() + ggtitle("Boxplot of Neuters by Year (C6)")
+
 
 ```
+
+
+
+## Cluster the Population into those who report a lot and those who do not
+
+```{r}
+
+# Subset neuters into 95% and 5% populations
+
+neuters_subset <- neuters %>% filter(total_number_performed < quantile(neuters$total_number_performed, 0.9, na.rm = TRUE))
+
+# Make a histogram of the total number of neuters
+
+ggplot(neuters_subset, aes(x = total_number_performed, fill = grad_year)) + geom_histogram(binwidth = 1) + ggtitle("Total Number of Neuters by Year (C6)")
+
+# Make a boxplot that breaks into castration and ovarioectomy
+
+ggplot(neuters_subset, aes(x = Skill, y = total_number_performed, fill = grad_year)) + geom_boxplot() + ggtitle("Boxplot of Neuters by Year (C6)")
+
+
+
+```
+
 
 
