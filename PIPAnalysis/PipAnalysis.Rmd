@@ -172,7 +172,15 @@ Post: The average difference in the score of students in the post-treatment peri
 ```{r}
 # What about controlling for hospital employment?
 df$Post <- ifelse(df$time > 6, 1, 0)
-didreg2 = lm(Average ~ PIPYN*Post + Hosp, data = df)
+df <- df %>%
+  group_by(UniqueID) %>%
+  mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
+  ungroup()
+
+# Try dropping the PIPStarts that are greater than 10
+df_test <- df %>% filter(PIPStart <= 10)
+
+didreg2 = lm(clinical_reasoning ~ PIPYN*Post + Hosp, data = df_test)
 summary(didreg2)
 ```
 
@@ -197,7 +205,7 @@ https://tilburgsciencehub.com/topics/analyze/causal-inference/did/staggered-did/
 #   mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
 #   ungroup()
 # table(df$time, df$PIPStart)
-
+pipdf <- df %>% filter(PIPYN==1)
 pipdf <- pipdf %>%
   group_by(UniqueID) %>%
   mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
