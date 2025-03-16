@@ -20,6 +20,10 @@ library(data.table)
 library(zoo)
 library(did)
 library(lubridate)
+library(survival)
+library(stats)
+library(sandwich)
+library(lmtest)
 
 ```
 
@@ -210,7 +214,7 @@ pipdf <- pipdf %>%
   group_by(UniqueID) %>%
   mutate(PIPStart = ifelse(any(PIPActive == 1), min(time[PIPActive == 1]), 0)) %>%
   ungroup()
-table(pipdf$time, pipdf$PIPStart)
+# table(pipdf$time, pipdf$PIPStart)
 
 ```
 
@@ -222,7 +226,7 @@ table(pipdf$time, pipdf$PIPStart)
 
 
 filtered <- df %>%
-  filter(!(PIPStart %in% c(5,8)))
+  filter(!(PIPStart %in% c(5,8, 10,11,12,13,14,15,17)))
 
 
 staggered_nevertreated <- att_gt(yname = "medical", # outcome variable
@@ -327,7 +331,7 @@ It currently assumes that the difference between a 1 and a 2 is the same as the 
 Workaround: Conditional Fixed Effects Ordered Logit
 
 ```{r}
-library(survival)
+
 df$medical_factor <- factor(df$medical, ordered = TRUE)
 # df$clinical_factor <- factor(df$clinical_reasoning, ordered = TRUE)
 # df$professional_factor <- factor(df$professionalism, ordered = TRUE)
@@ -335,9 +339,6 @@ df$medical_factor <- factor(df$medical, ordered = TRUE)
 
 # model.medical <- clogit(I(medical > 3) ~ PIPActive  + strata(UniqueID) + strata(time), data = df)
 # summary(model.medical)
-
-
-library(stats)
 
 model.medical <- glm(I(medical > 3) ~ PIPActive *time , data = df, family = binomial(link = "logit"))
 
@@ -361,11 +362,13 @@ Note: This model does not say anything about students not placed into a PIP. It 
 When adding in time impacts, the PIPActive variable no longer is statistically significant at a 0.05 level. Not only that, but it is actually negative! This suggests that the PIPs may have a negative impact on student scores at time 0. However, looking at the interaction term (which also is not statistically significant) it would show that the impact of PIPS improves scores by about 3% greater every time unit. This would mean that PIPs become more effective over time. If we think about this logically, this makes sense. Students need time to adjust to the PIP and to see the benefits of it. In their first rotation there is no way they would see the same benefits as they would in their last rotation.
 
 
+## Clustering Standard Errors
+
+
 ```{r}
 
 # A correct way to do clustering
-library(sandwich)
-library(lmtest)
+
 # Calculate clustered standard errors
 cluster_se <- vcovCL(model.medical, cluster = ~ UniqueID)
 # Summarize the model using clustered standard errors
@@ -374,9 +377,18 @@ print(summary_clustered)
 
 
 ```
-Shows limited impacts of PIPs; the interaction effect is insignificant and even if it was we would not see a serious growth.
+When utilizing clustering, again we do not see PIPs to be statistically significant. 
 
 There are potentially other ways of representing competency; visualize boxplots between PIPs and Not in a PIP. 
+
+```{r}
+# Look at the distribution of scores for students in PIPs and not in PIPs
+
+# Create a boxplot of scores for students in PIPs and not in PIPs
+
+boxplot(df$medical ~ df$PIPActive, ylab = "Medical Scores", xlab = "PIP Status", main = "Medical Scores by PIP Status")
+```
+
 
 
 

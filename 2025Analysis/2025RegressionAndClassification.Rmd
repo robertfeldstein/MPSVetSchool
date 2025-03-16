@@ -91,18 +91,24 @@ df25$time<- label_mapping[df25$strBlock]
 
 ```{r}
 
-# A slightly more difficult exercise 
-# Rather than selectively mapping the total number of procedures to the student,
-# we can map them overtime by merging the procedure to the course
+# This maps missing catalog numbers to the last service for each student
 
-# E.g. a student completed 3 castrations in 5601, and then they took 5601 in block a3, then we can put a 3 there
+# 1. Build a lookup table for the last rotation block for each student in df25
+last_rotation <- df25 %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service), .groups = "drop")
 
-# Step 1: Attach course info to procedures before aggregation
+# 2. For procedure data, join the last rotation block and use it for missing catalog_number
 dfproc_course <- dfproc %>%
   filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
-  select(ID, catalog_number, skill, total_number_performed)
+  # join last rotation info based on student ID (which is called ID in dfproc)
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  # if catalog_number is missing, use the last_service from df25
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  # select the updated column name
+  select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
 
-# Step 2: Aggregate by student (ID) and course (catalog_number)
+# 3. Aggregate by student (ID) and course (catalog_number)
 neuters <- dfproc_course %>%
   group_by(ID, catalog_number, skill) %>%
   summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
@@ -111,7 +117,7 @@ neuters <- dfproc_course %>%
 
 colnames(neuters) <- c("ID", "catalog_number", "Ov", "Castration")
 
-# Step 3: Merge with df25 (using both UniqueID and catalog_number)
+# 4. Merge with df25 using both UniqueID and service (which now matches catalog_number)
 df25 <- df25 %>%
   left_join(neuters, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
   mutate(
@@ -119,14 +125,15 @@ df25 <- df25 %>%
     Ov = replace_na(Ov, 0)
   )
 
-# Now ideally, we would make columns that are the total number of procedures performed up to that point
-
+# 5. Accumulate procedure totals up to the rotation block for each student
 df25$CastrationPerformed <- ave(df25$Castration, df25$UniqueID, FUN = cumsum)
 df25$OvPerformed <- ave(df25$Ov, df25$UniqueID, FUN = cumsum)
 
-# Repeat the same process for skill categories
-
+# If you want to apply a similar process for skill categories, do the same:
 skill_cat <- dfproc %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  select(ID, catalog_number = catalog_number_fixed, skill_category, total_number_performed) %>%
   group_by(ID, catalog_number, skill_category) %>%
   summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
@@ -140,16 +147,10 @@ df25 <- df25 %>%
     `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
   )
 
-
-# Sum the columns to get the total number of procedures performed up to that point
-
 df25$Surgical_Per <- ave(df25$`Surgical Skills`, df25$UniqueID, FUN = cumsum)
 df25$Procedural_Per <- ave(df25$`Procedural Skills`, df25$UniqueID, FUN = cumsum)
 df25$Dental_Per <- ave(df25$`Dental Skills`, df25$UniqueID, FUN = cumsum)
 df25$Anesthesia_Per <- ave(df25$`Anesthesia Skills`, df25$UniqueID, FUN = cumsum)
-
-
-
 ```
 
 
