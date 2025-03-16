@@ -26,7 +26,7 @@ library(lubridate)
 
 ```{r, include = FALSE}
 # Load in the Dataset
-df <- read.xlsx("../Data/FinalDataSet.xlsx")
+df <- read.xlsx("../Data/2025Data.xlsx")
 
 # Create a time column
 
@@ -53,8 +53,16 @@ Prior to analyzing the PIP data, we would like to get some visualizations on whe
 ```{r}
 # We'd really like to make a column called "PIPStart" that is 1 if 
 # the student started a PIP in that block and 0 otherwise
+
+df$PIPYN <- df$PIPOverall
+df$PIPActive <- df$PIPPrePost
+
 comparison <- df[,c("UniqueID", "strBlock", "medical", "Average", 
                     "PIPYN", "PIPActive", "Hosp", "time")]
+
+
+
+
 comparison <- comparison %>% group_by(UniqueID) %>% 
   mutate(PIPStart = ifelse(PIPActive == 1 & lag(PIPActive) == 0, 1, 0))
 
@@ -80,14 +88,14 @@ barplot(grouped$`sum(PIPActive)`, names.arg = grouped$strBlock, col =
 ```
 
 Mosaic Plots of Students in PIPs and whether or not they worked in a hospital.
+This section is still in progress because we do not yet have hospital information for 2025.
 
 ```{r}
-mosaicplot(table(comparison$PIPActive, comparison$Hosp), 
-           main = "PIP Active vs. Medical", xlab = "PIP Active", 
-           ylab = "Hospital Employment", color = c("grey", "brown"))
+# mosaicplot(table(comparison$PIPActive, comparison$Hosp), 
+#            main = "PIP Active vs. Medical", xlab = "PIP Active", 
+#            ylab = "Hospital Employment", color = c("grey", "brown"))
 ```
 
-The mosaic plot shows that students who are enrolled in PIPs are typically not employed in the hospital. However, there is still a substantial number of students who are employed in the hospital and are enrolled in PIPs sometime during their time in the program. Due to this, we may need to control for hospital employment in our models.
 
 \newpage 
 
@@ -119,8 +127,8 @@ Post: The average difference in the score of students in the post-treatment peri
 ```{r}
 # What about controlling for hospital employment?
 
-didreg2 = lm(Average ~ PIPYN*Post + Hosp, data = df)
-summary(didreg2)
+# didreg2 = lm(Average ~ PIPYN*Post + Hosp, data = df)
+# summary(didreg2)
 ```
 
 Interpretation:
@@ -153,9 +161,8 @@ table(df$time, df$PIPStart)
 # Make a variable that indicates the period in which the student started a PIP
 # This is the first period in which the student's PIPActive is a 1
 
-
 filtered <- df %>%
-  filter(!(PIPStart %in% c(5,12,15,17)))
+  filter(!(PIPStart %in% c(5,6,12,15,17)))
 
 
 
@@ -228,6 +235,20 @@ print(staggered_notyettreated_plot)
 model <- feols(Average ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
 summary(model)
 
+# Do it again, but with a different dependent variable
+
+model.medical <- feols(medical ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.medical)
+
+model.clinical <- feols(clinical_reasoning ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.clinical)
+
+model.professional <- feols(professionalism ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.professional)
+
+model.collaboration <- feols(collaboration ~ PIPActive | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model.collaboration)
+
 ```
 
 
@@ -258,4 +279,17 @@ ggplot(fe_df, aes(x = fe_id)) +
 
 ```
 
+```{r}
+library(survival)
+df$medical_factor <- factor(df$medical, ordered = TRUE)
+
+model.medical <- clogit(I(medical > 3) ~ PIPActive + strata(UniqueID), data = df)
+summary(model.medical)
+
+```
+
+```{r}
+coxph(Surv(rep(1, nrow(df)), I(medical > 3)) ~ PIPActive * time + strata(UniqueID), 
+      data = df, method = "exact")
+```
 
