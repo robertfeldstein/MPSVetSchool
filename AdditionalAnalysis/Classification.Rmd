@@ -186,11 +186,29 @@ ROC Curves, AOC, & Accuracy
 pred_avg<-predict(log_models[["Average"]], type = "response")
 pred_labels_avg<- ifelse(pred_avg > 0.5, 1, 0)
 pred_medical<-predict(log_models[["medical"]], type = "response")
+pred_labels_medical<- ifelse(pred_medical > 0.5, 1,0)
 pred_collaboration<-predict(log_models[["collaboration"]], type = "response")
+pred_labels_collaboration<- ifelse(pred_collaboration > 0.5, 1,0)
 pred_clinical_reasoning<-predict(log_models[["clinical_reasoning"]], type = "response")
+pred_labels_clinical<- ifelse(pred_clinical_reasoning > 0.5, 1,0)
 pred_professionalism<-predict(log_models[["professionalism"]], type = "response")
-pred_hosp<-predict(log_models_hosp[["Average"]], type = "response")
-pred_labels_hosp<- ifelse(pred_hosp > 0.5, 1, 0)
+pred_labels_professionalism<- ifelse(pred_professionalism > 0.5, 1,0)
+
+models<- c("Average", "medical", "collaboration", "clinical_reasoning", "professionalism")
+auc_hosp<- list()
+accuracy_hosp<- list()
+for (i in models){
+pred<- predict(log_models_hosp[[i]], type = "response")
+pred_labels<- ifelse(pred > 0.5, 1, 0)
+roc<- roc(hosp_df[[i]], pred)
+auc<- auc(roc)
+accuracy<- mean(pred_labels == hosp_df[[i]])
+accuracy_hosp[[i]]<- accuracy
+auc_hosp[[i]]<- auc
+}
+
+
+
 pred_early<-predict(log_models_early[["Average"]], type = "response")
 pred_labels_early<- ifelse(pred_early > 0.5, 1, 0)
 pred_pipyn<-predict(log_models_pip[["Average"]], type = "response")
@@ -205,12 +223,30 @@ roc_average<- roc(sample_df$Average, pred_avg)
 plot(roc_average, col = "blue", main = "ROC Curve")
 auc_average<- auc(roc_average)
 accuracy_average<- mean(pred_labels_avg == sample_df$Average)
+#Medical
+roc_medical<- roc(sample_df$medical, pred_medical)
+plot(roc_medical, col = "blue")
+auc_medical<- auc(roc_medical)
+accuracy_medical<- mean(pred_labels_medical == sample_df$medical)
+#Clinical Reasoning
+roc_clinical<- roc(sample_df$clinical_reasoning, pred_clinical_reasoning)
+auc_clinical<- auc(roc_clinical)
+accuracy_clinical<- mean(pred_labels_clinical == sample_df$clinical_reasoning)
+#Professionalism
+roc_professionalism<- roc(sample_df$professionalism, pred_professionalism)
+auc_professionalism<- auc(roc_professionalism)
+accuracy_professionalism<- mean(pred_labels_professionalism == sample_df$professionalism)
+#Collaboration
+roc_collaboration<- roc(sample_df$collaboration, pred_collaboration)
+auc_collaboration<- auc(roc_collaboration)
+accuracy_collaboration<- mean(pred_labels_collaboration == sample_df$collaboration)
+
 
 #Hospital Employees
-roc_hosp<- roc(hosp_df$Average, pred_hosp)
-plot(roc_hosp, col = "blue", main = "ROC Curve with 'Hosp' ")
-auc_hosp<- auc(roc_hosp)
-accuracy_hosp<- mean(pred_labels_hosp == hosp_df$Average)
+#roc_hosp<- roc(hosp_df$Average, pred_hosp)
+#plot(roc_hosp, col = "blue", main = "ROC Curve with 'Hosp' ")
+#auc_hosp<- auc(roc_hosp)
+#accuracy_hosp<- mean(pred_labels_hosp == hosp_df$Average)
 
 #Introductory Rotation Students
 roc_early<- roc(early_df$Average, pred_early)
