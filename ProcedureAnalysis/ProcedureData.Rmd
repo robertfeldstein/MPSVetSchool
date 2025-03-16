@@ -145,6 +145,13 @@ ggplot(df_new, aes(x = service, y = total_number_performed, fill = grad_year)) +
 
 ```
 
+```{r}
+# Count how much df_new$service == "Missing"
+
+df_new %>% filter(service == "Missing") %>% summarise(Count = sum(total_number_performed))
+
+```
+
 
 ```{r}
 # Plot a distribution for each category

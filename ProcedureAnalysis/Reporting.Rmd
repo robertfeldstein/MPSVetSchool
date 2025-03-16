@@ -1,0 +1,193 @@
+---
+title: "Procedure Reporting"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+# Load in procedure data
+df <- read_excel("../Data/FinalProcedures.xlsx")
+df$grad_year <- as.factor(df$grad_year)
+```
+
+
+
+
+```{r}
+# Goal is to explore the distribution of procedures reported by students
+# Reporting is optional, and we'd like to see if there are any trends in the reporting
+
+# Groupby ID, sum up total_number_performed
+total_performed <- df %>% group_by(ID) %>% summarise(total_number_performed = sum(total_number_performed, na.rm = TRUE))
+hist(total_performed$total_number_performed, breaks = 20, main = "Total Procedures Reported", xlab = "Number of Procedures Reported")
+```
+
+We see an extremely right-skewed distribution of the number of procedures reported by students. The vast majority of students report 0-20 procedures, with a few students reporting a large number of procedures. 
+
+```{r}
+# Group by ID, grad_year
+total_performed_by_yr <- df %>% group_by(skill_category, grad_year) %>% summarise(total_number_performed = sum(total_number_performed, na.rm = TRUE))
+
+# Ggplot to show the distribution of procedures reported by year
+ggplot(total_performed_by_yr, aes(x = grad_year, y = total_number_performed, fill = skill_category)) + geom_bar(stat = "identity", position = "dodge") + labs(title = "Total Procedures Reported by Year", x = "Graduation Year", y = "Number of Procedures Reported")
+```
+
+```{r}
+
+# For the students who report more than 100 procedures, what are the most common procedures reported?
+high_performers <- total_performed %>% filter(total_number_performed > 100)
+ids <- high_performers$ID
+high_performers_procedures <- df %>% filter(ID %in% ids) %>% group_by(skill_category) %>% summarise(total_number_performed = sum(total_number_performed, na.rm = TRUE)) 
+
+ggplot(high_performers_procedures, aes(x = skill_category, y = total_number_performed, fill = skill_category)) + geom_bar(stat = "identity") + labs(title = "Procedures Reported by High Performers", x = "Procedure", y = "Number of Procedures Reported")
+
+
+```
+
+```{r}
+# How many total procedures did the high performers log?
+sum(high_performers_procedures$total_number_performed)
+
+# What percentage of the total procedures reported is this?
+sum(high_performers_procedures$total_number_performed) / sum(total_performed$total_number_performed) * 100
+
+# What percentage of the population is a high performer?
+nrow(high_performers) / nrow(total_performed) * 100
+
+
+```
+
+
+
+```{r}
+# TODO: Is there a correlation in the number of procedures reported and the student's scores?
+
+# Load in student scores
+scores <- read_excel("../Data/2025Data.xlsx")
+
+# Count which block has the most students
+
+scores %>% group_by(strBlock) %>% summarise(n = n()) %>% arrange(desc(n))
+
+
+# Subset scores to just be the C4 block (latest block with a majority of students)
+
+scores <- scores %>% filter(strBlock == "C4")
+
+# Merge scores with total_performed
+scores <- scores %>% left_join(total_performed, by = c("UniqueID" = "ID"))
+
+# Plot scores$total_performed vs scores$medical
+
+ggplot(scores, aes(x = medical, y = total_number_performed)) + geom_point() + labs(title = "Total Procedures Reported vs Medical Knowledge Score", x = "Medical Knowledge Score", y = "Total Procedures Reported")
+
+# Make a boxplot of total_number_performed by medical score
+# Treat medical score as. a factor 
+
+scores$medical <- as.factor(scores$medical)
+
+ggplot(scores, aes(x = medical, y = total_number_performed)) + geom_boxplot() + labs(title = "Total Procedures Reported by Medical Knowledge Score", x = "Medical Knowledge Score", y = "Total Procedures Reported")
+
+
+
+```
+
+
+```{r}
+
+scores$medical <- as.numeric(scores$medical)
+
+# Correlation between medical score and total procedures reported
+# remove NA values
+
+cor(scores$total_number_performed, scores$medical, use = "complete.obs")
+cor(scores$total_number_performed, scores$clinical_reasoning, use = "complete.obs")
+cor(scores$total_number_performed, scores$professionalism, use = "complete.obs")
+cor(scores$total_number_performed, scores$collaboration, use = "complete.obs")
+cor(scores$total_number_performed, scores$Average, use = "complete.obs")
+
+
+```
+
+```{r}
+
+# Collect the average medical score for each student
+scores <- read_excel("../Data/2025Data.xlsx")
+avg_scores <- scores %>% group_by(UniqueID) %>% summarise(avg_medical = mean(medical, na.rm = TRUE),
+            avg_clinical = mean(clinical_reasoning, na.rm = TRUE), avg_professionalism = mean(professionalism, na.rm = TRUE), avg_collaboration = mean(collaboration, na.rm = TRUE), avg_total = mean(Average, na.rm = TRUE))
+
+# Merge this with total_performed
+
+avg_scores <- avg_scores %>% left_join(total_performed, by = c("UniqueID" = "ID"))
+
+# Plot avg_medical vs total_number_performed
+
+ggplot(avg_scores, aes(x = avg_medical, y = total_number_performed)) + geom_point() + labs(title = "Total Procedures Reported vs Average Medical Knowledge Score", x = "Average Medical Knowledge Score", y = "Total Procedures Reported")
+
+# Calculate correlation
+
+med_av <- cor(avg_scores$total_number_performed, avg_scores$avg_medical, use = "complete.obs")
+clin_av <- cor(avg_scores$total_number_performed, avg_scores$avg_clinical, use = "complete.obs")
+prof_av <- cor(avg_scores$total_number_performed, avg_scores$avg_professionalism, use = "complete.obs")
+col_av <- cor(avg_scores$total_number_performed, avg_scores$avg_collaboration, use = "complete.obs")
+avg_score <- cor(avg_scores$total_number_performed, avg_scores$avg_total, use = "complete.obs")
+
+# Make this into a nice table 
+
+cor_table <- data.frame(c("Medical", "Clinical Reasoning", "Professionalism", "Collaboration", "Total"), c(med_av, clin_av, prof_av, col_av, avg_score))
+colnames(cor_table) <- c("Score", "Correlation")
+cor_table
+
+```
+
+
+```{r}
+# Look at avg_scores again 
+
+# Avg_scores but without na 
+
+avg_scores <- avg_scores %>% filter(!is.na(total_number_performed))
+
+# Check statistical significance of the correlation between avg_medical and total_number_performed
+
+cor.test(avg_scores$total_number_performed, avg_scores$avg_medical, method = 'spearman')
+cor.test(avg_scores$total_number_performed, avg_scores$avg_clinical, method = 'spearman')
+cor.test(avg_scores$total_number_performed, avg_scores$avg_professionalism, method = 'spearman')
+cor.test(avg_scores$total_number_performed, avg_scores$avg_collaboration, method = 'spearman')
+cor.test(avg_scores$total_number_performed, avg_scores$avg_total, method = 'spearman')
+
+
+
+
+```
+
+
+```{r}
+
+# Can we use the average medical score to predict the number of procedures reported?
+
+# Linear regression model
+
+model <- lm(total_number_performed ~ avg_medical + avg_clinical + avg_professionalism + 
+              avg_collaboration, data = avg_scores)
+summary(model)
+
+```
+
+
+
+
+
