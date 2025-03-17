@@ -1,0 +1,149 @@
+---
+title: "EDA_2025"
+author: "Melissa Eckert"
+date: "2025-03-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exploratory Data Analysis
+
+Load packages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(openxlsx)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+Load data 
+```{r}
+df <- read.xlsx("../Data/FinalDataSet.xlsx")
+df_25 <- read.xlsx("../Data/2025Blind.xlsx")
+```
+
+Plot for mean scores over time for core attributes
+```{r}
+# Make a dataset that is just the first core attributes 
+core_scores <- c("UniqueID", "strBlock", "service", "medical", "clinical_reasoning", "professionalism", "collaboration")
+core_df <- df_25[, core_scores]
+
+# Remove rows with missing values
+core_df <- core_df %>% na.omit()
+
+# Group by strBlock to get the mean of each core attribute at each rotation
+core_df_grouped <- core_df %>% group_by(strBlock) %>% summarise_all(mean)
+core_df_grouped <- core_df_grouped %>% select(-UniqueID) %>% select(-service)
+
+# Plot the mean scores over the strBlocks
+
+core_df_grouped_long <- gather(core_df_grouped, key = "Attribute", value = "Score", -strBlock)
+
+ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + geom_line() + geom_point() + labs(title = "Mean Scores of Core Attributes Over Time", x = "Rotation", y = "Mean Score") + theme_minimal()
+
+
+# Save this image to the images folder
+ggsave("../images/mean_scores_2025.png", width = 10, height = 6)
+```
+
+Check for missing values 
+```{r}
+df_missing <- df_25 %>% filter(is.na(medical) | is.na(clinical_reasoning) | is.na(professionalism) | is.na(collaboration))
+df_missing
+```
+
+```{r}
+# Test linear regression
+sample_df <- df_25[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care", "Average", "procedural", "oral", "written")]
+
+# Linear Model
+# Convert strBlock to numeric 
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+sample_df$strBlockint<- label_mapping[sample_df$strBlock]
+
+
+# Make medical linear regression
+lm.fit.medical <- lm(medical ~ strBlockint, data = sample_df)
+
+
+# Make clinical reasoning linear regression
+lm.fit.clinical_reasoning <- lm(clinical_reasoning ~ strBlockint, data = sample_df)
+
+
+# Make professionalism linear regression
+lm.fit.professionalism <- lm(professionalism ~ strBlockint, data = sample_df)
+
+
+# Make collaboration linear regression
+lm.fit.collaboration <- lm(collaboration ~ strBlockint, data = sample_df)
+
+
+# Make patient care linear regression
+lm.fit.patient_care <- lm(patient_care ~ strBlockint, data = sample_df)
+
+
+# Procedural
+lm.fit.procedural <- lm(procedural ~ strBlockint, data = sample_df)
+
+# Oral
+
+lm.fit.oral <- lm(oral ~ strBlockint, data = sample_df)
+
+# Written
+
+lm.fit.written <- lm(written ~ strBlockint, data = sample_df)
+
+# Overall
+
+lm.fit.average <- lm(Average ~ strBlockint, data = sample_df)
+
+
+```
+
+Compare 2025 regression with 2024 regression
+```{r}
+sample_df24 <- df[,c("strBlock", "medical", "clinical_reasoning", "professionalism", "collaboration", "patient_care", "Average", "procedural", "oral", "written")]
+# Linear Model
+# Convert strBlock to numeric 
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+sample_df24$strBlockint<- label_mapping[sample_df24$strBlock]
+
+
+lm.2024<- lm(Average ~strBlockint, data = sample_df24 )
+ 
+df_25_plot_data<- sample_df |> group_by(strBlockint) |>
+  summarize(Average = mean(Average))
+df_24_plot_data<- sample_df24 |> group_by(strBlockint) |>
+  summarize(Average = mean(Average))
+ggplot() +
+  geom_point(data = df_24_plot_data, aes(x = strBlockint, y = Average, color = "2024")) +
+  geom_smooth(data = df_24_plot_data, aes(x = strBlockint, y = Average, color = "2024"), method = "lm", se = FALSE) +
+  geom_point(data = df_25_plot_data, aes(x = strBlockint, y = Average, color = "2025")) +
+  geom_smooth(data = df_25_plot_data, aes(x = strBlockint, y = Average, color = "2025"), method = "lm", se = FALSE) +
+  labs(title = "Average Scores Over Time for 2024 & 2025", x = "Rotation Block", y = "Average Score", color = "Year") +
+  scale_color_manual(values = c("2024" = "purple", "2025" = "orange")) +
+  scale_x_continuous(breaks = unique(sample_df24$strBlockint))+
+  theme_minimal()
+
+ggsave("../images/yearly_score_comparison.png", width = 10, height = 6)
+```
