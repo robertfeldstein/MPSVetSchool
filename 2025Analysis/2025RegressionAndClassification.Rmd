@@ -17,6 +17,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(stringr)
+library(pROC)
 ```
 
 ## Data Cleaning & Importation
@@ -217,7 +218,140 @@ result_table
 
 ## Classification Models
 
+First, let's repeat the 2024 logistic regression on the 2025 data 
 ```{r}
-# TODO: Add classification models :) have fun!
+#Convert attribute scores into competency categories
+df25_competency<- df25 |>
+    mutate(across(outcomes, ~ factor(
+      ifelse(. %in% c(1,2,3), 0, 1), levels = c(0,1)) )) |>
+  select(strBlock, time, everything())
+
+#function similar to above for logistic regression
+time_logistic_regression <- function(df, outcome) {
+  # Build the formula from the outcome string
+  fmla <- as.formula(paste(outcome, "~ time"))
+  fit <- glm(fmla, data = df, family = "binomial")
+  sfit <- summary(fit)
+  
+  # Extract the intercept and its p-value
+  int_est <- coef(sfit)["(Intercept)", "Estimate"]
+  int_p   <- coef(sfit)["(Intercept)", "Pr(>|z|)"]
+  
+  # Extract the coefficient for time and its p-value
+  time_est <- coef(sfit)["time", "Estimate"]
+  time_p   <- coef(sfit)["time", "Pr(>|z|)"]
+  
+  # Obtain odds ratio for the time coefficient 
+  time_odds_ratio<- exp(time_est)
+  
+  #Obtain model AUC
+  pred<- predict(fit, type = "response")
+  roc<- roc(df[[outcome]], pred)
+  auc<- auc(roc)
+  
+  return(c(Intercept = int_est, Intercept_p = int_p,
+           Time_coef = time_est, Time_odds_ratio = time_odds_ratio, Time_p = time_p, model_AUC = auc))
+}
+
+# Build a table by applying function to each outcome
+result_table_log <- do.call(rbind, lapply(outcomes, function(o) time_logistic_regression(df25_competency, o)))
+result_table_log <- data.frame(Outcome = outcomes, result_table_log)
+result_table_log
+
+
+
+```
+Now, lets incorporate procedural variables
+
+```{r}
+
+#Look at medical knowledge only 
+
+glm.medical <- glm(medical ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, family = "binomial",data = df25_competency)
+summary(glm.medical)
+
+#Look at clinical reasoning only 
+glm.clinical <- glm(clinical_reasoning ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, family = "binomial",data = df25_competency)
+summary(glm.clinical)
+
+#Create another function to include procedural variables for all attributes  
+
+procedure_logistic_regression <- function(df, outcome) {
+  # Build the formula from the outcome string
+  fmla <- as.formula(paste(outcome, "~ PIPOverall + time + CastrationPerformed + OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per"))
+  fit <- glm(fmla, data = df, family = "binomial")
+  sfit <- summary(fit)
+  
+  # Extract each coefficient and its p-value
+  int_est <- coef(sfit)["(Intercept)", "Estimate"]
+  int_p   <- coef(sfit)["(Intercept)", "Pr(>|z|)"]
+  
+  # Extract the coefficient for time and its p-value
+  time_est <- coef(sfit)["time", "Estimate"]
+  time_p   <- coef(sfit)["time", "Pr(>|z|)"]
+  
+  # Extract the coefficient for PIP and its p-value
+  pip_est <- coef(sfit)["PIPOverall", "Estimate"]
+  pip_p   <- coef(sfit)["PIPOverall", "Pr(>|z|)"]
+  
+  
+  
+  # Extract the coefficient for castrations and its p-value
+  castration_est <- coef(sfit)["CastrationPerformed", "Estimate"]
+  castration_p   <- coef(sfit)["CastrationPerformed", "Pr(>|z|)"]
+  
+  # Extract the coefficient for ovariectomies and its p-value
+  ov_est <- coef(sfit)["OvPerformed", "Estimate"]
+  ov_p   <- coef(sfit)["OvPerformed", "Pr(>|z|)"]
+  
+  # Extract the coefficient for surgical skills and its p-value
+  surgical_est <- coef(sfit)["Surgical_Per", "Estimate"]
+  surgical_p   <- coef(sfit)["Surgical_Per", "Pr(>|z|)"]
+  
+  # Extract the coefficient for procedural and its p-value
+  procedural_est <- coef(sfit)["Procedural_Per", "Estimate"]
+  procedural_p   <- coef(sfit)["Procedural_Per", "Pr(>|z|)"]
+  
+  # Extract the coefficient for dental and its p-value
+  dental_est <- coef(sfit)["Dental_Per", "Estimate"]
+  dental_p   <- coef(sfit)["Dental_Per", "Pr(>|z|)"]
+  
+  # Extract the coefficient for anesthesia and its p-value
+  anesthesia_est <- coef(sfit)["Anesthesia_Per", "Estimate"]
+  anesthesia_p   <- coef(sfit)["Anesthesia_Per", "Pr(>|z|)"]
+  
+  
+  # Obtain odds ratio for the time coefficient 
+  time_odds<- exp(time_est)
+  pip_odds<- exp(pip_est)
+  castration_odds<- exp(castration_est)
+  ov_odds<- exp(ov_est)
+  surgical_odds<-exp(surgical_est)
+  procedural_odds<- exp(procedural_est)
+  dental_odds<- exp(dental_est)
+  anesthesia_odds<-exp(anesthesia_est)
+  
+  #Obtain model AUC
+  pred<- predict(fit, type = "response")
+  roc<- roc(df[[outcome]], pred)
+  auc<- auc(roc)
+  
+  return(c(Intercept = int_est, Intercept_p = int_p, PIP = pip_est, PIP_odds_ratio = pip_odds, PIP_p = pip_p,
+           Time_coef = time_est, Time_odds_ratio = time_odds, Time_p = time_p,
+           Castration_coef = castration_est, Castration_odds_ratio = castration_odds, Castration_p = castration_p,
+           Ov_coef = ov_est, Ov_odds_ratio = ov_odds, Ov_p  = ov_p, 
+           Surgical_coef = surgical_est, Surgical_odds_ratio = surgical_odds, Surgical_p = surgical_p,
+           Procedural_coef = procedural_est, Procedural_odds_ratio = procedural_odds, Procedural_p = procedural_p,
+           Dental_coef = dental_est, Dental_odds_ratio = dental_odds, Dental_p = dental_p,
+           Anesthesia_coef = anesthesia_est, Anesthesia_odds_ratio = anesthesia_odds, Anesthesia_p = anesthesia_p,model_AUC = auc))
+}
+
+# Build a table by applying function to each outcome
+result_table_procedural <- do.call(rbind, lapply(outcomes, function(o) procedure_logistic_regression(df25_competency, o)))
+result_table_procedural <- data.frame(Outcome = outcomes, result_table_procedural)
+result_table_procedural
+
 ```
 
