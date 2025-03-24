@@ -1,0 +1,427 @@
+---
+title: "Multinomial Logit Models"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(nnet)
+library(MASS)
+```
+
+```{r}
+# We need both the 2025 data, and the procedure data
+
+df25 <- read_xlsx("../Data/2025Data.xlsx", sheet = 1)
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# We need to aggregate the procedure data to the student level
+# For now, we will just look at Ovarioectomy/Ovariohysterectomy and Castration
+
+neuters <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  group_by(ID, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Rename neuters column names
+colnames(neuters) <- c("ID", "Total_Ov", "Total_Castration")
+
+
+# Add time variable
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df25$time<- label_mapping[df25$strBlock]
+
+# This maps missing catalog numbers to the last service for each student
+
+# 1. Build a lookup table for the last rotation block for each student in df25
+last_rotation <- df25 %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service), .groups = "drop")
+
+# 2. For procedure data, join the last rotation block and use it for missing catalog_number
+dfproc_course <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  # join last rotation info based on student ID (which is called ID in dfproc)
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  # if catalog_number is missing, use the last_service from df25
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  # select the updated column name
+  dplyr::select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
+
+# 3. Aggregate by student (ID) and course (catalog_number)
+neuters <- dfproc_course %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+colnames(neuters) <- c("ID", "catalog_number", "Ov", "Castration")
+
+# 4. Merge with df25 using both UniqueID and service (which now matches catalog_number)
+df25 <- df25 %>%
+  left_join(neuters, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Castration = replace_na(Castration, 0),
+    Ov = replace_na(Ov, 0)
+  )
+
+# 5. Accumulate procedure totals up to the rotation block for each student
+df25$CastrationPerformed <- ave(df25$Castration, df25$UniqueID, FUN = cumsum)
+df25$OvPerformed <- ave(df25$Ov, df25$UniqueID, FUN = cumsum)
+
+# If you want to apply a similar process for skill categories, do the same:
+skill_cat <- dfproc %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  dplyr::select(ID, catalog_number = catalog_number_fixed, skill_category, total_number_performed) %>%
+  group_by(ID, catalog_number, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
+
+df25 <- df25 %>% 
+  left_join(skill_cat, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    `Surgical Skills` = replace_na(`Surgical Skills`, 0),
+    `Procedural Skills` = replace_na(`Procedural Skills`, 0),
+    `Dental Skills` = replace_na(`Dental Skills`, 0),
+    `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
+  )
+
+df25$Surgical_Per <- ave(df25$`Surgical Skills`, df25$UniqueID, FUN = cumsum)
+df25$Procedural_Per <- ave(df25$`Procedural Skills`, df25$UniqueID, FUN = cumsum)
+df25$Dental_Per <- ave(df25$`Dental Skills`, df25$UniqueID, FUN = cumsum)
+df25$Anesthesia_Per <- ave(df25$`Anesthesia Skills`, df25$UniqueID, FUN = cumsum)
+```
+
+
+```{r}
+
+# Convert to factors
+
+df25$medical <- as.factor(df25$medical)
+df25$clinical_reasoning <- as.factor(df25$clinical_reasoning)
+df25$professionalism <- as.factor(df25$professionalism)
+df25$collaboration <- as.factor(df25$collaboration)
+df25$patient_care <- as.factor(df25$patient_care)
+df25$procedural <- as.factor(df25$procedural)
+
+```
+
+```{r}
+# Basic Multinomial Model
+# mnl_model <- multinom(medical~OvPerformed+ CastrationPerformed + time + PIPOverall,data = df25)
+# summary(mnl_model)
+```
+
+
+```{r}
+# Ordered logit assumes that the categories are ordered (e.g. 1 < 2 < 3 < 4 < 5)
+# Fit the model (logistic has lowest AIC)
+ordered_medical <- polr(medical ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE,
+                        method = "logistic")
+summary(ordered_medical)
+```
+
+Interpretation: 
+
+Note: P-values are missing, so we look at the t value. If the magnitude of the t-value is greater than 1.96, this would equate to a p-value less than 0.05, indicating significance.
+
+Coefficients: Each of the coefficients represents the log odds of moving up one level in the ordered factor. For example, a positive coefficient for OvPerformed would indicate that as the number of Ovarioectomies performed increases, the odds of moving up a level in the medical rating also increase. We would take the exponential of the coefficient to get the precise odds ratio.
+
+Intercepts: These represent the cutoff points between the different levels of the ordered factor. For example, the first intercept is the cutoff between the first and second levels, the second intercept is the cutoff between the second and third levels, and so on. These cutoffs are floating point numbers because they represent the cut off for the latent variable that is being estimated, not the visible ordered factor.The magnitude of the intercept can be interpreted as the "size" of the gap between the levels. The more negative an intercept, the less likely a student is to be in that level gap. 
+
+
+```{r}
+# Lowest AIC is loglog
+ordered_clinical <- polr(clinical_reasoning ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE, method = "logistic")
+summary(ordered_clinical)
+```
+
+
+```{r}
+ordered_professionalism <- polr(professionalism ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE, method = "logistic")
+summary(ordered_professionalism)
+```
+
+
+```{r}
+ordered_collaboration <- polr(collaboration ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE, method = "logistic")
+summary(ordered_collaboration)
+```
+
+
+```{r}
+ordered_patient <- polr(patient_care ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE, method = "logistic")
+summary(ordered_patient)
+```
+
+```{r}
+ordered_procedural <- polr(procedural ~ OvPerformed + CastrationPerformed + time + PIPOverall, data = df25, Hess = TRUE, method = "logistic")
+summary(ordered_procedural)
+```
+
+## 2024 Multinomial Logit Models
+
+```{r}
+df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
+
+# Convert strBlock column to integers
+df24$time<- label_mapping[df24$strBlock]
+
+df24$medical <- as.factor(df24$medical)
+ordered_medical_24 <- polr(medical ~ Hosp + Early + PIPYN + time, data = df24)
+```
+
+```{r}
+
+library(ordinal)
+m1 <- clm(medical ~ Hosp + PIPActive + time, data = df24)
+m2 <- clm(medical ~ Hosp + PIPActive + time, nominal = ~Hosp  + PIPActive + time, data = df24)
+anova(m1, m2)
+
+```
+
+Unforunately, one of the key assumptions of POLR is violated. So we can use a non-ordinal multinomial logistic regression model instead, which does not assume proportional effects of variables.
+
+
+```{r}
+library(nnet)
+
+df24$medical_factor <- factor(df24$medical)
+df24$medical_factor <- relevel(df24$medical_factor, ref = "3")
+
+model <- multinom(medical_factor ~ Hosp + Early + PIPActive + time, data = df24)
+summary(model)
+```
+
+Here is a more advanced function that can automatically 
+
+```{r}
+multinom_logit <- function(var, df, predictors = NULL, ref_level = "3") {
+  require(nnet)
+  
+  # Create formula
+  if (is.null(predictors)) {
+    stop("Please provide a vector of predictor variable names")
+  }
+  
+  # Create a copy of the dataframe
+  df_copy <- df
+  
+  # Convert the dependent variable to factor and set reference level
+  var_factor_name <- paste0(var, "_factor")
+  df_copy[[var_factor_name]] <- factor(df_copy[[var]])
+  
+  # Check if reference level exists in the data
+  if (!(ref_level %in% levels(df_copy[[var_factor_name]]))) {
+    stop(paste("Reference level", ref_level, "not found in the data"))
+  }
+  
+  # Set reference level
+  df_copy[[var_factor_name]] <- relevel(df_copy[[var_factor_name]], ref = ref_level)
+  
+  # Update formula to use the factor version
+  formula_str <- paste(var_factor_name, "~", paste(predictors, collapse = " + "))
+  formula_obj <- as.formula(formula_str)
+  
+  # Fit the model
+  model <- multinom(formula_obj, data = df_copy, trace = FALSE)
+  
+  # Calculate z-statistics
+  z_stats <- coef(model) / summary(model)$standard.errors
+  
+  # Calculate p-values
+  p_values <- (1 - pnorm(abs(z_stats))) * 2
+  
+  # Format p-values with significance stars
+  get_stars <- function(p) {
+    stars <- ""
+    if (p < 0.001) stars <- "***"
+    else if (p < 0.01) stars <- "**"
+    else if (p < 0.05) stars <- "*"
+    else if (p < 0.1) stars <- "."
+    return(stars)
+  }
+  
+  p_values_formatted <- matrix(
+    paste0(format(round(p_values, 4), nsmall = 4), 
+           " ", 
+           apply(p_values, c(1, 2), get_stars)),
+    nrow = nrow(p_values)
+  )
+  rownames(p_values_formatted) <- rownames(p_values)
+  colnames(p_values_formatted) <- colnames(p_values)
+  
+  # Calculate odds ratios
+  odds_ratios <- exp(coef(model))
+  
+  # Create custom summary table
+  coefs <- coef(model)
+  std_errors <- summary(model)$standard.errors
+  
+  result_summary <- list()
+  for (i in 1:nrow(coefs)) {
+    category <- rownames(coefs)[i]
+    result_summary[[category]] <- data.frame(
+      Coefficient = coefs[i,],
+      StdError = std_errors[i,],
+      OddsRatio = odds_ratios[i,],
+      p_value = p_values[i,],
+      Significance = apply(matrix(p_values[i,], nrow = 1), 2, get_stars)
+    )
+  }
+  
+  # Run an overall likelihood ratio test for each predictor
+  lr_results <- data.frame(
+    Predictor = character(),
+    LR_Stat = numeric(),
+    df = numeric(),
+    p_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Full model
+  full_model <- model
+  
+  # Test each predictor
+  for (pred in predictors) {
+    # Create reduced formula without this predictor
+    reduced_preds <- predictors[predictors != pred]
+    reduced_formula <- as.formula(paste(var_factor_name, "~", 
+                                       ifelse(length(reduced_preds) > 0,
+                                              paste(reduced_preds, collapse = " + "),
+                                              "1")))
+    
+    # Fit reduced model
+    reduced_model <- tryCatch({
+      multinom(reduced_formula, data = df_copy, trace = FALSE)
+    }, error = function(e) {
+      message("Error fitting reduced model without ", pred, ": ", e$message)
+      return(NULL)
+    })
+    
+    if (!is.null(reduced_model)) {
+      # Calculate likelihood ratio test
+      lr_stat <- 2 * (logLik(full_model) - logLik(reduced_model))
+      degrees_freedom <- length(coef(full_model)) - length(coef(reduced_model))
+      p_val <- 1 - pchisq(lr_stat, degrees_freedom)
+      
+      # Add to results
+      lr_results <- rbind(lr_results, data.frame(
+        Predictor = pred,
+        LR_Stat = as.numeric(lr_stat),
+        df = degrees_freedom,
+        p_value = as.numeric(p_val),
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Add significance markers
+  if (nrow(lr_results) > 0) {
+    lr_results$Significance <- sapply(lr_results$p_value, get_stars)
+  }
+  
+  # Return all results in a list
+  return(list(
+    model = model,
+    summary = summary(model),
+    p_values = p_values_formatted,
+    odds_ratios = odds_ratios,
+    coefficient_summary = result_summary,
+    likelihood_ratio_tests = lr_results,
+    formula = formula_obj,
+    reference_level = ref_level
+  ))
+}
+
+# Pretty print function to display all results nicely
+print_multinom_results <- function(results) {
+  cat("=== MULTINOMIAL LOGISTIC REGRESSION RESULTS ===\n")
+  cat("\nModel Formula:", deparse(results$formula), "\n")
+  cat("Reference Level:", results$reference_level, "\n\n")
+  
+  cat("=== COEFFICIENTS AND P-VALUES ===\n")
+  for (cat_name in names(results$coefficient_summary)) {
+    cat("\nCategory", cat_name, "vs Reference", results$reference_level, ":\n")
+    print(results$coefficient_summary[[cat_name]])
+  }
+  
+  cat("\n=== LIKELIHOOD RATIO TESTS FOR PREDICTORS ===\n")
+  if (nrow(results$likelihood_ratio_tests) > 0) {
+    print(results$likelihood_ratio_tests)
+  } else {
+    cat("No likelihood ratio tests could be computed.\n")
+  }
+  
+  cat("\n=== MODEL FIT ===\n")
+  cat("Residual Deviance:", results$model$deviance, "\n")
+  cat("AIC:", results$model$AIC, "\n")
+  cat("Number of observations:", results$model$edf, "\n")
+}
+
+```
+
+```{r}
+medical_24 <- multinom_logit(
+  var = "medical", 
+  df = df24, 
+  predictors = c("Hosp", "Early", "PIPActive", "time")
+)
+print_multinom_results(medical_24)
+```
+
+
+
+```{r}
+clinical_24 <- multinom_logit(
+  var = "clinical_reasoning", 
+  df = df24, 
+  predictors = c("Hosp", "Early", "PIPActive", "time")
+)
+print_multinom_results(clinical_24)
+```
+
+```{r}
+
+colab_24 <- multinom_logit(
+  var = "collaboration", 
+  df = df24, 
+  predictors = c("Hosp", "Early", "PIPActive", "time")
+)
+print_multinom_results(colab_24)
+
+```
+
+```{r}
+prof_24 <- multinom_logit(
+  var = "professionalism", 
+  df = df24, 
+  predictors = c("Hosp", "Early", "PIPActive", "time")
+)
+print_multinom_results(prof_24)
+
+```
+
+
