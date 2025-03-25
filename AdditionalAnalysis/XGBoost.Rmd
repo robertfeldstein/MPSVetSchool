@@ -1,0 +1,306 @@
+---
+title: "XGBoost"
+author: "Melissa Eckert"
+date: "2025-03-24"
+output: html_document
+---
+
+Load packages 
+```{r}
+library(tidyverse)
+library(pROC)
+library(xgboost)
+library(caret)
+library(readxl)
+```
+
+Load data
+```{r}
+df24<- read_xlsx("../Data/FinalDataSet.xlsx")
+df25<- read_xlsx("../Data/2025Data.xlsx")
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx")
+
+```
+
+```{r}
+# We need to aggregate the procedure data to the student level
+# For now, we will just look at Ovarioectomy/Ovariohysterectomy and Castration
+
+neuters <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  group_by(ID, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Rename neuters column names
+colnames(neuters) <- c("ID", "Total_Ov", "Total_Castration")
+
+# Make a skill_category dataset
+
+skill_cat <- dfproc %>%
+  group_by(ID, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Now we need to merge the two dataframes
+# Make a new column in df25 and df24 called TotalOv and TotalCa
+# It looks at the ID and then pulls the total from the neuters dataframe
+
+df25 <- df25 %>%
+  left_join(neuters, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    Total_Castration = replace_na(Total_Castration, 0),
+    Total_Ov = replace_na(Total_Ov, 0)
+  )
+df24 <- df24 %>%
+  left_join(neuters, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    Total_Castration = replace_na(Total_Castration, 0),
+    Total_Ov = replace_na(Total_Ov, 0)
+  )
+
+# Now we need to merge the skill_cat dataframe
+
+df25 <- df25 %>%
+  left_join(skill_cat, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    `Total_Surgical Skills` = replace_na(`Total_Surgical Skills`, 0),
+    `Total_Procedural Skills` = replace_na(`Total_Procedural Skills`, 0),
+    `Total_Dental Skills` = replace_na(`Total_Dental Skills`, 0),
+    `Total_Anesthesia Skills` = replace_na(`Total_Anesthesia Skills`, 0)
+  )
+df24 <- df24 %>%
+  left_join(skill_cat, by = c("UniqueID" = "ID")) %>%
+  mutate(
+    `Total_Surgical Skills` = replace_na(`Total_Surgical Skills`, 0),
+    `Total_Procedural Skills` = replace_na(`Total_Procedural Skills`, 0),
+    `Total_Dental Skills` = replace_na(`Total_Dental Skills`, 0),
+    `Total_Anesthesia Skills` = replace_na(`Total_Anesthesia Skills`, 0)
+  )
+
+
+# Rename columns to add underscores
+df25 <- df25 %>%
+  rename_with(~str_replace_all(., " ", "_"))
+df24 <- df24 %>%
+  rename_with(~str_replace_all(., " ", "_"))
+
+# Add time variable
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df25$time<- label_mapping[df25$strBlock]
+df24$time<- label_mapping[df24$strBlock]
+
+
+
+
+```
+
+```{r}
+
+# This maps missing catalog numbers to the last service for each student
+
+# 1. Build a lookup table for the last rotation block for each student in df25 & df24
+last_rotation25 <- df25 %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service), .groups = "drop")
+last_rotation24 <- df24 %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service), .groups = "drop")
+
+# 2. For procedure data, join the last rotation block and use it for missing catalog_number
+dfproc_course25 <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  # join last rotation info based on student ID (which is called ID in dfproc)
+  left_join(last_rotation25, by = c("ID" = "UniqueID")) %>%
+  # if catalog_number is missing, use the last_service from df25
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  # select the updated column name
+  select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
+
+dfproc_course24 <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  # join last rotation info based on student ID (which is called ID in dfproc)
+  left_join(last_rotation24, by = c("ID" = "UniqueID")) %>%
+  # if catalog_number is missing, use the last_service from df24
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  # select the updated column name
+  select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
+
+# 3. Aggregate by student (ID) and course (catalog_number)
+neuters25 <- dfproc_course25 %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+colnames(neuters25) <- c("ID", "catalog_number", "Ov", "Castration")
+
+neuters24 <- dfproc_course24 %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+colnames(neuters24) <- c("ID", "catalog_number", "Ov", "Castration")
+
+# 4. Merge with df25 using both UniqueID and service (which now matches catalog_number)
+df25 <- df25 %>%
+  left_join(neuters25, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Castration = replace_na(Castration, 0),
+    Ov = replace_na(Ov, 0)
+  )
+#df24
+df24 <- df24 %>%
+  left_join(neuters24, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Castration = replace_na(Castration, 0),
+    Ov = replace_na(Ov, 0)
+  )
+
+# 5. Accumulate procedure totals up to the rotation block for each student
+df25$CastrationPerformed <- ave(df25$Castration, df25$UniqueID, FUN = cumsum)
+df25$OvPerformed <- ave(df25$Ov, df25$UniqueID, FUN = cumsum)
+
+df24$CastrationPerformed <- ave(df24$Castration, df24$UniqueID, FUN = cumsum)
+df24$OvPerformed <- ave(df24$Ov, df24$UniqueID, FUN = cumsum)
+
+# If you want to apply a similar process for skill categories, do the same:
+skill_cat <- dfproc %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  select(ID, catalog_number = catalog_number_fixed, skill_category, total_number_performed) %>%
+  group_by(ID, catalog_number, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
+
+df25 <- df25 %>% 
+  left_join(skill_cat, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    `Surgical Skills` = replace_na(`Surgical Skills`, 0),
+    `Procedural Skills` = replace_na(`Procedural Skills`, 0),
+    `Dental Skills` = replace_na(`Dental Skills`, 0),
+    `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
+  )
+
+df25$Surgical_Per <- ave(df25$`Surgical Skills`, df25$UniqueID, FUN = cumsum)
+df25$Procedural_Per <- ave(df25$`Procedural Skills`, df25$UniqueID, FUN = cumsum)
+df25$Dental_Per <- ave(df25$`Dental Skills`, df25$UniqueID, FUN = cumsum)
+df25$Anesthesia_Per <- ave(df25$`Anesthesia Skills`, df25$UniqueID, FUN = cumsum)
+```
+
+XGBoost for 2025 Data
+```{r, warning = FALSE}
+set.seed(0627)
+
+predictors <- c("PIPOverall", "time","CastrationPerformed", "OvPerformed")
+target_vars<- c("medical", "clinical_reasoning", "professionalism", "collaboration", "procedural")
+df25 <- df25[!is.na(df25$procedural), ]
+#split data into train and test sets
+train_index = createDataPartition(y = df25$procedural, p = 0.8, list = FALSE)
+train<- df25[train_index,]
+test<- df25[-train_index,]
+#define k-fold cross validation
+control<- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+
+#baseline RMSE for comparison
+baseline_rmse_proc<- sd(df25$procedural, na.rm = TRUE)
+baseline_rmse_med<-sd(df25$medical, na.rm = TRUE) 
+
+#train separate models & obtain RMSE for each attribute 
+results25 <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+
+for(i in target_vars){
+ labels<- train[[i]] 
+ 
+  #impute missing values with the median
+ labels[is.na(labels)]<- median(labels, na.rm = TRUE)
+ #train data for current attribute
+ Dtrain<- as.matrix(train[, predictors]) 
+ Dtrain <- data.frame(Dtrain, target = labels)
+  
+ xgb_model<- train(target ~. , data = Dtrain, method = "xgbTree",
+                   trControl = control, metric = "RMSE")
+ #get test set predictions
+ Dtest<- as.matrix(test[,predictors]) 
+ test_labels<- test[[i]]
+ pred<- predict(xgb_model, newdata = Dtest )
+ 
+ #get performance metrics
+ metrics<- postResample(pred, test_labels )
+ results25 <- rbind(results25, data.frame(
+    Attribute = i,
+    RMSE = metrics["RMSE"],
+    R2 = metrics["Rsquared"]
+  ))
+ #feature importance
+ importance_matrix <- xgb.importance(feature_names = predictors, 
+                                    model = xgb_model$finalModel)
+ xgb.plot.importance(importance_matrix) 
+  
+}
+
+```
+
+XGBoost for 2024 Data
+```{r, warning = FALSE}
+set.seed(0627)
+
+predictors24 <- c("PIPActive", "time","CastrationPerformed", "OvPerformed", "Hosp", "Early")
+target_vars<- c("medical", "clinical_reasoning", "professionalism", "collaboration", "procedural")
+df24 <- df24[!is.na(df24$procedural), ]
+#split data into train and test sets
+train_index24 = createDataPartition(y = df24$procedural, p = 0.8, list = FALSE)
+train24<- df24[train_index,]
+test24<- df24[-train_index,]
+#define k-fold cross validation
+control24<- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+
+#baseline RMSE for comparison
+baseline_rmse_proc24<- sd(df24$procedural, na.rm = TRUE)
+baseline_rmse_med24<-sd(df24$medical, na.rm = TRUE) 
+
+#train separate models & obtain RMSE for each attribute 
+results24 <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+
+for(i in target_vars){
+ labels<- train24[[i]] 
+ 
+  #impute missing values with the median
+ labels[is.na(labels)]<- median(labels, na.rm = TRUE)
+ #train data for current attribute
+ Dtrain<- as.matrix(train24[, predictors24]) 
+ Dtrain <- data.frame(Dtrain, target = labels)
+  
+ xgb_model<- train(target ~. , data = Dtrain, method = "xgbTree",
+                   trControl = control, metric = "RMSE")
+ #get test set predictions
+ Dtest<- as.matrix(test24[,predictors24]) 
+ test_labels<- test24[[i]]
+ pred<- predict(xgb_model, newdata = Dtest )
+ 
+ #get performance metrics
+ metrics<- postResample(pred, test_labels )
+ results24 <- rbind(results24, data.frame(
+    Attribute = i,
+    RMSE = metrics["RMSE"],
+    R2 = metrics["Rsquared"]
+  ))
+ #feature importance
+ importance_matrix <- xgb.importance(feature_names = predictors24, 
+                                    model = xgb_model$finalModel)
+ xgb.plot.importance(importance_matrix) 
+  
+}
+
+```
