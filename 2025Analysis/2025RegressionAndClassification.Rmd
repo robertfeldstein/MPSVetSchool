@@ -180,6 +180,21 @@ summary(lm.clinical)
 
 Unfortunately, it does not appear to be the case that the new procedural data is significantly associated with scores. This could be due to the fact that we are working with an incomplete dataset. 
 
+```{r}
+lm.prof <- lm(professionalism ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, data = df25)
+summary(lm.prof)
+```
+
+```{r}
+
+lm.coll <- lm(collaboration ~ PIPOverall + time + CastrationPerformed + 
+               OvPerformed + Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, data = df25)
+
+summary(lm.coll)
+
+```
+
 
 ```{r}
 # We can also do the standard time based linear regressions we did previously
@@ -214,6 +229,24 @@ result_table
 
 
 ```
+
+
+```{r}
+# Run it on procedural 
+
+# lm.procedural <- lm(procedural ~  CastrationPerformed + 
+              # OvPerformed + time, data = df25)
+
+#summary(lm.procedural)
+
+# Try it again with just the other variables 
+# 
+lm.procedural <- lm(procedural ~ time+ Surgical_Per + Procedural_Per + Dental_Per + Anesthesia_Per, data = df25)
+summary(lm.procedural)
+```
+
+
+
 
 
 ## Classification Models
