@@ -1,0 +1,154 @@
+---
+title: "Detrended Linear Regression Models"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(nnet)
+```
+
+
+### 2024 Data
+
+```{r}
+
+df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df24$time<- label_mapping[df24$strBlock]
+
+```
+
+### 2024 Medical Detrended
+
+```{r}
+
+df24_complete <- df24[complete.cases(df24$medical, df24$time), ]
+
+# Fit the linear model on the complete cases
+lm24.med <- lm(medical ~ time, data = df24_complete)
+
+# Extract residuals
+df24_complete$medresid <- residuals(lm24.med)
+
+# Merge residuals back into the original dataframe
+df24$medresid <- NA  # Initialize with NA
+df24$medresid[complete.cases(df24$medical, df24$time)] <- df24_complete$medresid
+
+# Now fit a linear regression model to these residuals.
+
+lm24.res <- lm(medresid ~ Hosp + PIPYN + Early, data = df24)
+summary(lm24.res)
+
+```
+
+## Ordinal Logistic Regression
+
+```{r}
+library(MASS)
+
+# Convert medical to an ordered factor
+df24$medical <- factor(df24$medical, ordered = TRUE)
+
+# Fit an ordinal logistic regression model
+ord_logit <- polr(medical ~ Hosp + Early + PIPYN + time, data = df24, method = "logistic")
+summary(ord_logit)
+
+
+```
+
+Interpretation:
+
+This model is actually easier to interpret than the previous model we utilized. The outputted coefficients are in terms of log-odds. They represent the change in log-odds for each one unit increase in the variable. For PIPYN, a value of -0.89 in log-odds means that students in a PIP are 41% as likely to score higher than students not in a PIP. For time, a log odds of around 0.1 means that for every rotation block, a student is about 1.1 times as likely to score higher than they did in the previous rotation block. This compounds overtime, after 10 rotations a student is 2.6 times as likely to score higher than they did at the start.
+
+The intercepts represent the log-odds of being at or below the cutoff point, before the variables are considered. E.g. what are the chances of being at a 3 or lower regardless of a student's individual attributes. The higher the value, the lower the probability of being a specific number.
+
+## 2025 Data
+
+
+```{r}
+
+df25 <- read_xlsx("../Data/2025Data.xlsx", sheet = 1)
+
+# Convert strBlock column to integers
+df25$time<- label_mapping[df25$strBlock]
+
+```
+
+
+```{r}
+# Try fitting a random effect on studentID 
+
+library(lme4)
+model <- lmer(medical ~ time + Hosp + Early + PIPYN + (1 | UniqueID), data = df24)
+summary(model)
+
+```
+
+```{r}
+
+# Cumulative Linked Mixed Models 
+library(ordinal)
+df24$medical_f <- as.factor(df24$medical)
+clmodel <- clmm(medical_f ~ time + Hosp + Early + PIPYN + (1 | UniqueID), data = df24, Hess = T)
+summary(clmodel)
+
+```
+
+
+```{r}
+# Try a simplified DID model here 
+# Average of rotations 1-7, average of rotations 7-end
+
+df24$post <- ifelse(df24$time >12, 1, 0)
+df24$treat <- ifelse(df24$PIPYN == 1, 1, 0)
+
+
+# Create interaction term
+df24$did <- df24$post * df24$treat
+
+# Run DID regression
+model <- lm(clinical_reasoning ~ post + treat + did, data = df24)
+summary(model)
+
+
+```
+
+```{r}
+library(fixest)
+feols(clinical_reasoning ~ post + treat + did, cluster = ~UniqueID, data = df24)
+```
+
+```{r}
+# Check the assumptions for POLR for df24
+# medical ~ hosp + PIPYN + early + time 
+
+sf <- function(y) {
+  c('Y>=1'= qlogis(mean(y>=1)),
+    'Y>=2' = qlogis(mean(y >=2)),
+    'Y>=3' = qlogis(mean(y>=3)),
+    'Y>=4' = qlogis(mean(y>=4)),
+    'Y>=5' = qlogis(mean(y>=5))
+    )
+}
+
+(s <- with(df24, summary(as.numeric(medical) ~ Hosp + PIPYN + Early + time, fun = sf)))
+
+glm(I(as.numeric(medical) >= 4) ~ Hosp, family="binomial", data = df24)
+glm(I(as.numeric(medical) >= 3) ~ Hosp, family="binomial", data = df24)
+
+```
+
