@@ -18,6 +18,7 @@ library(tidyr)
 library(stringr)
 library(nnet)
 library(MASS)
+library(ordinal)
 ```
 
 ```{r}
@@ -54,12 +55,9 @@ df25$time<- label_mapping[df25$strBlock]
 
 # This maps missing catalog numbers to the last service for each student
 
-# 1. Build a lookup table for the last rotation block for each student in df25
 last_rotation <- df25 %>%
   group_by(UniqueID) %>%
   summarise(last_service = last(service), .groups = "drop")
-
-# 2. For procedure data, join the last rotation block and use it for missing catalog_number
 dfproc_course <- dfproc %>%
   filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
   # join last rotation info based on student ID (which is called ID in dfproc)
@@ -68,17 +66,13 @@ dfproc_course <- dfproc %>%
   mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
   # select the updated column name
   dplyr::select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
-
-# 3. Aggregate by student (ID) and course (catalog_number)
 neuters <- dfproc_course %>%
   group_by(ID, catalog_number, skill) %>%
   summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
               names_prefix = "Total_")
-
 colnames(neuters) <- c("ID", "catalog_number", "Ov", "Castration")
 
-# 4. Merge with df25 using both UniqueID and service (which now matches catalog_number)
 df25 <- df25 %>%
   left_join(neuters, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
   mutate(
@@ -86,11 +80,11 @@ df25 <- df25 %>%
     Ov = replace_na(Ov, 0)
   )
 
-# 5. Accumulate procedure totals up to the rotation block for each student
+
 df25$CastrationPerformed <- ave(df25$Castration, df25$UniqueID, FUN = cumsum)
 df25$OvPerformed <- ave(df25$Ov, df25$UniqueID, FUN = cumsum)
 
-# If you want to apply a similar process for skill categories, do the same:
+
 skill_cat <- dfproc %>%
   left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
   mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
@@ -130,8 +124,8 @@ df25$procedural <- as.factor(df25$procedural)
 
 ```{r}
 # Basic Multinomial Model
-# mnl_model <- multinom(medical~OvPerformed+ CastrationPerformed + time + PIPOverall,data = df25)
-# summary(mnl_model)
+mnl_model <- multinom(medical~OvPerformed+ CastrationPerformed + time + PIPOverall,data = df25)
+summary(mnl_model)
 ```
 
 
@@ -195,7 +189,7 @@ ordered_medical_24 <- polr(medical ~ Hosp + Early + PIPYN + time, data = df24)
 
 ```{r}
 
-library(ordinal)
+
 m1 <- clm(medical ~ Hosp + PIPActive + time, data = df24)
 m2 <- clm(medical ~ Hosp + PIPActive + time, nominal = ~Hosp  + PIPActive + time, data = df24)
 anova(m1, m2)
@@ -206,8 +200,6 @@ Unforunately, one of the key assumptions of POLR is violated. So we can use a no
 
 
 ```{r}
-library(nnet)
-
 df24$medical_factor <- factor(df24$medical)
 df24$medical_factor <- relevel(df24$medical_factor, ref = "3")
 
@@ -215,46 +207,40 @@ model <- multinom(medical_factor ~ Hosp + Early + PIPActive + time, data = df24)
 summary(model)
 ```
 
-Here is a more advanced function that can automatically 
+
+
+
+
+Here is a more advanced function that can automatically calculate the p-values for us, which is a nice help.
 
 ```{r}
+# We set the reference level to 3, since that helps us compare competency vs. non-competency
 multinom_logit <- function(var, df, predictors = NULL, ref_level = "3") {
-  require(nnet)
-  
-  # Create formula
+  # Start by making the model formula
   if (is.null(predictors)) {
     stop("Please provide a vector of predictor variable names")
   }
-  
-  # Create a copy of the dataframe
+  # Create a copy of the dataframe so we do not mess with the existing data
   df_copy <- df
-  
-  # Convert the dependent variable to factor and set reference level
+  # Set the reference level
   var_factor_name <- paste0(var, "_factor")
   df_copy[[var_factor_name]] <- factor(df_copy[[var]])
-  
-  # Check if reference level exists in the data
+  # Check if reference level exists in the data (should be fine, except for values of 1)
   if (!(ref_level %in% levels(df_copy[[var_factor_name]]))) {
     stop(paste("Reference level", ref_level, "not found in the data"))
   }
-  
-  # Set reference level
   df_copy[[var_factor_name]] <- relevel(df_copy[[var_factor_name]], ref = ref_level)
-  
-  # Update formula to use the factor version
+  # Make the formula string (thank you Professor Entner)
   formula_str <- paste(var_factor_name, "~", paste(predictors, collapse = " + "))
   formula_obj <- as.formula(formula_str)
-  
   # Fit the model
+  # set trace to false, so that way we are not flooded with the convergence information
   model <- multinom(formula_obj, data = df_copy, trace = FALSE)
-  
-  # Calculate z-statistics
+  # Calculate z-statistics using typical value - 0/(sqrt(var))
   z_stats <- coef(model) / summary(model)$standard.errors
-  
-  # Calculate p-values
+  # Calculate p-values with pnorm function (don't forget to double it)
   p_values <- (1 - pnorm(abs(z_stats))) * 2
-  
-  # Format p-values with significance stars
+  # Format p-values for added interpretability
   get_stars <- function(p) {
     stars <- ""
     if (p < 0.001) stars <- "***"
@@ -263,7 +249,6 @@ multinom_logit <- function(var, df, predictors = NULL, ref_level = "3") {
     else if (p < 0.1) stars <- "."
     return(stars)
   }
-  
   p_values_formatted <- matrix(
     paste0(format(round(p_values, 4), nsmall = 4), 
            " ", 
@@ -387,18 +372,22 @@ print_multinom_results <- function(results) {
 medical_24 <- multinom_logit(
   var = "medical", 
   df = df24, 
-  predictors = c("Hosp", "Early", "PIPActive", "time")
+  predictors = c("Hosp", "Early", "PIPYN", "time")
 )
 print_multinom_results(medical_24)
 ```
 
-
-
 ```{r}
+
+# Remove category of 1 from clinical reasoning
+library(dplyr)
+# filter 
+df24 = df24 %>% filter(clinical_reasoning!=1) 
+
 clinical_24 <- multinom_logit(
   var = "clinical_reasoning", 
   df = df24, 
-  predictors = c("Hosp", "Early", "PIPActive", "time")
+  predictors = c("Hosp", "Early", "PIPActive", "time", "procedural")
 )
 print_multinom_results(clinical_24)
 ```
@@ -424,4 +413,32 @@ print_multinom_results(prof_24)
 
 ```
 
+```{r}
+clinical_25 <- multinom_logit(
+  var = "clinical_reasoning",
+  df = df25,
+  predictors = c("OvPerformed", "CastrationPerformed", "time", "PIPOverall")
+)
+print_multinom_results(clinical_25)
 
+```
+
+In the future, we might be able to make an R-Shiny visualization out of this.
+
+```{r}
+# Run a quick PCA on the df24
+# Let medical score be the outcome variable 
+
+df24$medical <- as.numeric(df24$medical)
+df24$clinical_reasoning <- as.numeric(df24$clinical_reasoning)
+df24$professionalism <- as.numeric(df24$professionalism)
+df24$collaboration <- as.numeric(df24$collaboration)
+
+pca <- prcomp(~medical + clinical_reasoning + 
+            professionalism + collaboration + patient_care + procedural, data = df24, scale = T)
+summary(pca)
+
+pca$rotation
+biplot(pca, scale = 0)
+```
+Look at weights to understand the pairing of variables; we see that medical and clinical_reasoning are paired together, while professionalism and collaboration.
