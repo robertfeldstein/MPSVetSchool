@@ -20,7 +20,7 @@ library(tidyr)
 
 ```{r}
 # Load in the Datasets, categorize them the same way
-
+library(readxl)
 # Load all data
 df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
 df25 <- read_xlsx("../Data/2025Data.xlsx", sheet=1)
@@ -122,9 +122,71 @@ linear_rmse
 
 ## XGBoost
 
+
+
 ```{r}
-# First a general XGBoost Model that predicts continuous values
-# Then an XGBoost model that classifies if the score >= 4
+library(xgboost)
+
+predictors24 <- c("PIPYN", "time","CastrationPerformed", "OvPerformed", "Early")
+target_vars <- c("medical", "clinical_reasoning","procedural", "professionalism", "collaboration")
+
+# Attribute Collection
+xgbmse <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+
+set.seed(123)
+folds <- createFolds(df24$procedural, k = 5, list = TRUE)
+
+for(i in target_vars){
+  # Remove NA
+  labels <- df24[[i]]
+  labels[is.na(labels)] <- median(labels, na.rm = TRUE)
+  
+  # 2024 Training Set
+  dtrain <- xgb.DMatrix(data = as.matrix(df24[, predictors24]), 
+                       label = labels)
+  
+  # Model Parameters
+  params <- list(
+    objective = "reg:squarederror",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  
+  # Train on 2024
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    verbose = 0
+  )
+  
+  # Predictions
+  dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24]))
+  pred <- predict(xgb_model, dtest)
+  
+  # MSE
+  test_labels <- df25[[i]]
+  rmse <- sqrt(mean((pred - test_labels)^2, na.rm = TRUE))
+  ss_total <- sum((test_labels - mean(test_labels, na.rm = TRUE))^2, na.rm = TRUE)
+  ss_residual <- sum((test_labels - pred)^2, na.rm = TRUE)
+  r_squared <- 1 - ss_residual/ss_total
+  
+  # Update
+  xgbmse <- rbind(results24, data.frame(
+    Attribute = i,
+    RMSE = rmse,
+    R2 = r_squared
+  ))
+}
+
+xgbmse
+```
+
+```{r}
+# For later, but repeat XGBoost 
 ```
 
 
