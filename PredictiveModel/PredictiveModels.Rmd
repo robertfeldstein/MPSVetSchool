@@ -377,7 +377,160 @@ survfit2(fit, newdata = new_subject) %>%
   add_confidence_interval() 
 ```
 
+## Badging System
+
+Client responded, indicating that one useful indicator of success is reaching a "badge of 1" in individual categories.
+
+This means that we can build survival curves for each type of badge, but that we can also make one super category that checks if a student has reached a badge of 1 in each score category. I would consider these students to be successful.
+
+```{r}
+# First define the badges based on the system given by client
+# A score of 5 is worth 2 points, a score of 4 is worth 1 point, all other scores are 0.
+
+cols_to_convert <- c("medical", "clinical_reasoning", "professionalism"
+  , "collaboration", "patient_care", "procedural", "oral", "written")
+
+df <- df %>%
+  mutate(
+    across(
+      all_of(cols_to_convert),
+      ~ ifelse(. == 5, 2, ifelse(. == 4, 1, 0)),
+      .names = "{.col}points"
+    )
+  )
+
+add_first_time_threshold <- function(data, points_col, threshold) {
+  library(dplyr)
+
+  data %>%
+    group_by(UniqueID) %>%
+    mutate(
+      # Replace NAs with zero before cumsum
+      points_clean = ifelse(is.na(.data[[points_col]]), 0, .data[[points_col]]),
+      cum_points = cumsum(points_clean)
+    ) %>%
+    summarise(
+      first_time_threshold = if (any(cum_points >= threshold, na.rm = TRUE)) {
+        min(time[cum_points >= threshold], na.rm = TRUE)
+      } else {
+        -1
+      }
+    )
+}
+
+# We are just going to call this function a bunch of times to make a dataframe 
+# That extracts the badging times we need
+columns_with_points <- c()
+for (col_name in colnames(df)) {
+  if (grepl("points", col_name)) {
+    columns_with_points <- c(columns_with_points, col_name)
+  }
+}
+
+thresholds <- c(5,5,8,8,4,4,3,4)
+
+badge_times <- df %>%
+  dplyr::distinct(UniqueID)
+
+for (i in seq_along(columns_with_points)) {
+  col_name <- columns_with_points[i]
+  thr <- thresholds[i]
+  # Call function
+  temp <- add_first_time_threshold(df, col_name, thr) %>%
+    # Rename the column
+    dplyr::rename(!!paste0("time_", col_name) := first_time_threshold)
+  # Join back
+  badge_times <- dplyr::left_join(badge_times, temp, by = "UniqueID")
+}
+
+badge_times$Competent <- ifelse(apply(badge_times, 1, function(row) all(row != -1)), 1, 0)
+
+badge_times <- badge_times%>%
+  rowwise() %>%
+  mutate(
+    competency_time = if (Competent == 1) {
+      max(c_across(!matches("UniqueID|Competent")), na.rm = TRUE)
+    } else {
+      -1
+    }
+  ) %>%
+  ungroup()
+
+```
 
 
+```{r}
+# Okay that was horrible, but we are about ready to make the survival model
 
+competency_time <- badge_times$competency_time
+badgeSurv <- cbind(flat_atts,competency_time)
+
+# Just use 2024 for now, since technically 2025 doesn't even have enough time to be competent yet
+
+badgeSurv <- badgeSurv[1:116,]
+
+# Encode the Censorship
+badgeSurv$status <- ifelse(badgeSurv$competency_time != -1, 1, 0)
+# Now replace the -1's with 25 since that was the end of the study
+badgeSurv$competency_time <- ifelse(badgeSurv$competency_time == -1, 25, 
+                                 badgeSurv$competency_time)
+
+# compSurv <-  merge(competency, flat_atts, by = "UniqueID")
+colnames(badgeSurv)[colnames(badgeSurv) == "competency_time"] <- "time"
+
+badgeSurv
+
+```
+
+```{r}
+survfit2(Surv(time, status) ~ 1, data = badgeSurv) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+    ) + 
+  add_confidence_interval() +
+  add_risktable()
+```
+```{r}
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
+
+new_subject <- data.frame(
+  PIPYN = 0,   # example value
+  Early = 0,   # example value
+  Hosp = 1     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+  ) + 
+  add_confidence_interval() 
+```
+
+```{r}
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
+
+new_subject <- data.frame(
+  PIPYN = 1,   # example value
+  Early = 0,   # example value
+  Hosp = 0     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+  ) + 
+  add_confidence_interval() 
+```
 
