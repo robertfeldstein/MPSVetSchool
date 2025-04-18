@@ -1,0 +1,149 @@
+---
+title: "2024Models2025Predictions"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Required Libraries 
+library(readxl)
+library(nnet)
+library(dplyr)
+library(tidyr)
+```
+
+
+```{r}
+# Load in the Datasets, categorize them the same way
+
+# Load all data
+df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
+df25 <- read_xlsx("../Data/2025Data.xlsx", sheet=1)
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# Get time
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+df24$time <- match(df24$strBlock, labels)
+colnames(df25) <- colnames(df24)
+df25$time <- match(df25$strBlock, labels)
+# Combine the dataframes together for easier calculation of the 
+df <- rbind(df24, df25)
+
+# Grab last rotation
+last_rotation <- df %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service))
+
+# Neuters
+neuter_counts <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number = ifelse(is.na(catalog_number), last_service, catalog_number)) %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, 
+              values_from = total,
+              values_fill = 0) %>%
+  rename(Ov = `Ovarioectomy/Ovariohysterectomy`)
+
+# Calculate Cumulative Castrations and Ovariectomies
+df <- df %>%
+  left_join(neuter_counts, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Ov = coalesce(Ov, 0),
+    Castration = coalesce(Castration, 0),
+    OvPerformed = ave(Ov, UniqueID, FUN = cumsum),
+    CastrationPerformed = ave(Castration, UniqueID, FUN = cumsum)
+  )
+
+# Split df back into df24 and df25
+df24 <- df[df$UniqueID<=117,]
+df25 <- df[df$UniqueID>117,]
+
+# Drop the other dataframes to clear the environment
+keep_objects <- c("df24", "df25", "df")
+rm(list = setdiff(ls(), keep_objects))
+
+```
+
+
+## Linear Regression
+
+```{r}
+# Variables to use in model building:
+# 2024 Data: time + PIPYN + Ovariectomies + Castrations + early (do NOT use Hosp here)
+# 2025 Data: time + PIPYN + Ovariectomies + Castrations + early (again, no Hosp)
+
+# Again, this purposely does not include Hosp
+
+# medical, procedural, clinical reasoning, professionalism and collaboration
+
+# Loop over the score variables
+score_variables <- c("medical", "clinical_reasoning", "procedural", "professionalism", "collaboration")
+
+# One linear model per variable
+linearmodels <- list()
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  form <- as.formula(paste(score, "~ time + PIPYN + OvPerformed + 
+                           CastrationPerformed + Early"))
+  model <- lm(form, data = df24)
+  linearmodels[[i]] <- model
+  names(linearmodels)[i] <- score
+}
+
+# Now use these linear models to make predictions using the 2025 data
+linearpredictions <- data.frame(UniqueID = df25$UniqueID)
+for (score in score_variables) {
+  model <- linearmodels[[score]]
+  linearpredictions[score] <- predict(model, newdata = df25)
+}
+
+# Now calculate RMSE 
+linear_rmse <- numeric(length(score_variables))
+names(linear_rmse) <- score_variables
+
+for (i in seq_along(score_variables)) {
+  score <- score_variables[i]
+  linear_rmse[i] <- sqrt(mean((df25[[score]] - linearpredictions[[score]])^2, na.rm=TRUE))
+}
+
+linear_rmse
+```
+
+
+## XGBoost
+
+```{r}
+# First a general XGBoost Model that predicts continuous values
+# Then an XGBoost model that classifies if the score >= 4
+```
+
+
+## Logit
+
+```{r}
+
+```
+
+
+## Multinomial Logistic
+
+```{r}
+
+```
+
+## Detrended Datasets
+
+```{r}
+
+```
+

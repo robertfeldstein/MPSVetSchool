@@ -1,0 +1,536 @@
+---
+title: "Predictive Models"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = F}
+library(readxl)
+library(nnet)
+library(ordinal)
+library(lme4)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(ggplot2)
+library(ggsurvfit)
+```
+
+```{r}
+
+df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
+df25 <- read_xlsx("../Data/2025Data.xlsx", sheet=1)
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df24$time<- label_mapping[df24$strBlock]
+df25$time <- label_mapping[df25$strBlock]
+```
+
+```{r}
+# Combine df24 and df25 
+colnames(df25) <- colnames(df24)
+df <- rbind(df24,df25)
+```
+
+```{r}
+# Add in the data regarding procedures
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# We need to aggregate the procedure data to the student level
+# For now, we will just look at Ovarioectomy/Ovariohysterectomy and Castration
+
+neuters <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  group_by(ID, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+
+# Rename neuters column names
+colnames(neuters) <- c("ID", "Total_Ov", "Total_Castration")
+
+
+# This maps missing catalog numbers to the last service for each student
+
+last_rotation <- df %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service), .groups = "drop")
+dfproc_course <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  # join last rotation info based on student ID (which is called ID in dfproc)
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  # if catalog_number is missing, use the last_service from df25
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  # select the updated column name
+  dplyr::select(ID, catalog_number = catalog_number_fixed, skill, total_number_performed)
+neuters <- dfproc_course %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, values_from = total, values_fill = 0, 
+              names_prefix = "Total_")
+colnames(neuters) <- c("ID", "catalog_number", "Ov", "Castration")
+
+df <- df %>%
+  left_join(neuters, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Castration = replace_na(Castration, 0),
+    Ov = replace_na(Ov, 0)
+  )
+
+
+df$CastrationPerformed <- ave(df$Castration, df$UniqueID, FUN = cumsum)
+df$OvPerformed <- ave(df$Ov, df$UniqueID, FUN = cumsum)
+
+skill_cat <- dfproc %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
+  dplyr::select(ID, catalog_number = catalog_number_fixed, skill_category, total_number_performed) %>%
+  group_by(ID, catalog_number, skill_category) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
+
+df <- df %>% 
+  left_join(skill_cat, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    `Surgical Skills` = replace_na(`Surgical Skills`, 0),
+    `Procedural Skills` = replace_na(`Procedural Skills`, 0),
+    `Dental Skills` = replace_na(`Dental Skills`, 0),
+    `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
+  )
+
+df$Surgical_Per <- ave(df$`Surgical Skills`, df$UniqueID, FUN = cumsum)
+df$Procedural_Per <- ave(df$`Procedural Skills`, df$UniqueID, FUN = cumsum)
+df$Dental_Per <- ave(df$`Dental Skills`, df$UniqueID, FUN = cumsum)
+df$Anesthesia_Per <- ave(df$`Anesthesia Skills`, df$UniqueID, FUN = cumsum)
+```
+
+
+```{r}
+
+df$procedural_f <- as.factor(df$procedural)
+clmodel <- clmm(procedural_f ~ time + Early + PIPYN + Hosp + (1 | UniqueID + service), data = df, Hess = T)
+summary(clmodel)
+```
+
+
+## One Type of "Predictive Model"
+
+$$P(Y \leq j | X) = logit^{-1}(\theta_j-\eta(x)) $$
+
+$$P(Y \leq 3 | t = t*) = logit^{-1}(\theta_{3|4}-\eta(x)) = 0.1$$
+
+$\eta(x) = \beta_0 + \beta_1 * \text{time} + \beta_2*\text{Hospital} + \beta_3*\text{PIP}$
+
+We backwards solve this equation to get the time t required such that the probability = 0.1. 
+
+
+```{r}
+
+# Thresholds (cut-points for cumulative logits)
+# Fixed effects
+betas <- clmodel$beta
+
+# Thresholds
+thresholds <- clmodel$Theta
+
+# Extract values
+theta3 <- thresholds[3]
+beta_time <- betas["time"]
+beta_Early <- betas["Early"]
+beta_PIPYN <- betas["PIPYN"]
+
+# Set covariate values
+Early_val <- 0
+PIPYN_val <- 1
+
+# Target cumulative probability:
+target_prob <- 0.8
+target_logit <- -qlogis(1-target_prob)  
+
+# Solve for time
+numerator <- theta3 + target_logit - (beta_Early * Early_val + beta_PIPYN * PIPYN_val)
+time_to_reach <- numerator / beta_time
+
+time_to_reach
+
+```
+
+## Other Predictive Models
+
+```{r}
+# Let's Try a Survival Model
+# We want a model that can take individual student attributes and output time to event
+# Process borrowed heavily from: https://www.emilyzabor.com/survival-analysis-in-r.html
+
+
+# For now, let's use the heuristic of time to reach 3rd score of 4
+# Ideally, we'd like a very flat dataset, just one row per student
+# ID | Time to Score 3 4's | Success/Failure | Hosp | Early | PIPYN
+# Difficulty will be finding the time to score 3 4's
+
+
+df$isFour <- ifelse(df$medical >= 4, 1, 0)
+
+survival_set <- df %>%
+  group_by(UniqueID) %>%
+  mutate(cumulative_four = cumsum(isFour)) %>%
+  summarise(
+    timeSuccess = if (max(cumulative_four, na.rm = TRUE) >= 3) {
+      min(time[cumulative_four == 3], na.rm = TRUE)
+    } else {
+      -1
+    }
+  )
+
+# Encode the Censorship
+survival_set$status <- ifelse(survival_set$timeSuccess != -1, 1, 0)
+# Now replace the -1's with 25 since that was the end of the study
+survival_set$timeSuccess <- ifelse(survival_set$timeSuccess == -1, 25, survival_set$timeSuccess)
+
+# Now join on UniqueID with df to get PIPYN, Early, Hosp
+
+flat_atts <- df %>% group_by(UniqueID) %>% summarise(PIPYN = mean(PIPYN), Early = mean(Early), Hosp = mean(Hosp,na.rm=T))
+
+medSurv <- merge(survival_set, flat_atts, by = "UniqueID")
+
+# Rename timeSuccess to time, to make code more compatible
+colnames(medSurv)[colnames(medSurv) == "timeSuccess"] <- "time"
+head(medSurv)
+
+
+```
+
+```{r}
+Surv(medSurv$time, medSurv$status)[1:30]
+```
+
+```{r}
+s1 <- survfit(Surv(time, status) ~ 1, data = medSurv)
+str(s1)
+```
+
+```{r}
+# Nice Plot
+survfit2(Surv(time, status) ~ 1, data = medSurv) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Scoring 3 4's"
+  )
+```
+
+
+```{r}
+survfit2(Surv(time, status) ~ 1, data = medSurv) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Scoring 3 4's"
+    ) + 
+  add_confidence_interval() +
+  add_risktable()
+```
+
+At Risk: How many students have yet to score 3 4's in their medical category.
+Events: How many students have scored 3 4's.
+
+```{r}
+# Using the Model to Estimate Probability of a student scoring 3 4's at a certain time block
+summary(survfit(Surv(time, status) ~ 1, data = medSurv), times = 15)
+```
+
+```{r}
+# Median Survival Time 
+survfit(Surv(time, status) ~ 1, data = medSurv)
+```
+So about half of the student's reach this arbitrary level of medical competency by their 14th rotation.
+
+```{r}
+# Comparing Groups
+survdiff(Surv(time, status) ~ PIPYN, data = medSurv)
+```
+There is a statistically significant difference in Survival time between students in a PIP and not in a PIP. This makes sense, but it's really awesome to see it from this perspective.
+
+```{r}
+survdiff(Surv(time, status) ~ Hosp, data = medSurv)
+```
+This only looks at class of 2024, but we again see a statistically significant relationship between Hospital employees and those who don't!
+
+```{r}
+# Let's get a regression model going to estimate these differences
+coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = medSurv) 
+```
+
+Interpretation:
+
+Hazard Risk = exp(coef)
+
+"The HR is interpreted as the instantaneous rate of occurrence of the event of interest in those who are still at risk for the event."
+
+HR < 1: Reduced hazard of scoring 3 4's.
+HR > 1: Increased hazard of scoring 3 4's.
+
+
+## Using Survival Curves to Predict Student Success Times
+
+```{r}
+# Cox Model
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = medSurv)
+
+new_subject <- data.frame(
+  PIPYN = 1,   # example value
+  Early = 1,   # example value
+  Hosp = 1     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Scoring 3 4's"
+  ) + 
+  add_confidence_interval() 
+```
+
+
+Think about what the client actually wants: 
+
+Ideally, the client would get a model that allows them to predict where a student "ends up" at the end of the 25 rotations. 
+
+Competency: Formally a student gets a competent score if they score above a 3. But they take lots of classes and get lots of scores.So what makes them classified as competent, permanently?
+
+Perhaps average score > 4 three times in three subsequent rotations?
+
+```{r}
+
+df$AverageCompetent <- ifelse(df$Average >= 4, 1, 0)
+competency <- df %>%
+  group_by(UniqueID) %>%
+  arrange(time) %>%  # ensure rows are in time order
+  mutate(
+    three_in_a_row = AverageCompetent == 1 &
+                     lag(AverageCompetent, 1, default = 0) == 1 &
+                     lag(AverageCompetent, 2, default = 0) == 1
+  ) %>%
+  summarise(
+    timeSuccess = if (any(three_in_a_row, na.rm = TRUE)) {
+      min(time[three_in_a_row], na.rm = TRUE)
+    } else {
+      -1
+    }
+  )
+
+# Encode the Censorship
+competency$status <- ifelse(competency$timeSuccess != -1, 1, 0)
+# Now replace the -1's with 25 since that was the end of the study
+competency$timeSuccess <- ifelse(competency$timeSuccess == -1, 25, competency$timeSuccess)
+
+compSurv <-  merge(competency, flat_atts, by = "UniqueID")
+colnames(compSurv)[colnames(compSurv) == "timeSuccess"] <- "time"
+
+```
+
+```{r}
+survfit2(Surv(time, status) ~ 1, data = compSurv) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Scoring 3 in a Row"
+    ) + 
+  add_confidence_interval() +
+  add_risktable()
+```
+
+
+```{r}
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = compSurv)
+
+new_subject <- data.frame(
+  PIPYN = 0,   # example value
+  Early = 0,   # example value
+  Hosp = 1     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Scoring 3 4's or higher in a Row"
+  ) + 
+  add_confidence_interval() 
+```
+
+## Badging System
+
+Client responded, indicating that one useful indicator of success is reaching a "badge of 1" in individual categories.
+
+This means that we can build survival curves for each type of badge, but that we can also make one super category that checks if a student has reached a badge of 1 in each score category. I would consider these students to be successful.
+
+```{r}
+# First define the badges based on the system given by client
+# A score of 5 is worth 2 points, a score of 4 is worth 1 point, all other scores are 0.
+
+cols_to_convert <- c("medical", "clinical_reasoning", "professionalism"
+  , "collaboration", "patient_care", "procedural", "oral", "written")
+
+df <- df %>%
+  mutate(
+    across(
+      all_of(cols_to_convert),
+      ~ ifelse(. == 5, 2, ifelse(. == 4, 1, 0)),
+      .names = "{.col}points"
+    )
+  )
+
+add_first_time_threshold <- function(data, points_col, threshold) {
+  library(dplyr)
+
+  data %>%
+    group_by(UniqueID) %>%
+    mutate(
+      # Replace NAs with zero before cumsum
+      points_clean = ifelse(is.na(.data[[points_col]]), 0, .data[[points_col]]),
+      cum_points = cumsum(points_clean)
+    ) %>%
+    summarise(
+      first_time_threshold = if (any(cum_points >= threshold, na.rm = TRUE)) {
+        min(time[cum_points >= threshold], na.rm = TRUE)
+      } else {
+        -1
+      }
+    )
+}
+
+# We are just going to call this function a bunch of times to make a dataframe 
+# That extracts the badging times we need
+columns_with_points <- c()
+for (col_name in colnames(df)) {
+  if (grepl("points", col_name)) {
+    columns_with_points <- c(columns_with_points, col_name)
+  }
+}
+
+thresholds <- c(5,5,8,8,4,4,3,4)
+
+badge_times <- df %>%
+  dplyr::distinct(UniqueID)
+
+for (i in seq_along(columns_with_points)) {
+  col_name <- columns_with_points[i]
+  thr <- thresholds[i]
+  # Call function
+  temp <- add_first_time_threshold(df, col_name, thr) %>%
+    # Rename the column
+    dplyr::rename(!!paste0("time_", col_name) := first_time_threshold)
+  # Join back
+  badge_times <- dplyr::left_join(badge_times, temp, by = "UniqueID")
+}
+
+badge_times$Competent <- ifelse(apply(badge_times, 1, function(row) all(row != -1)), 1, 0)
+
+badge_times <- badge_times%>%
+  rowwise() %>%
+  mutate(
+    competency_time = if (Competent == 1) {
+      max(c_across(!matches("UniqueID|Competent")), na.rm = TRUE)
+    } else {
+      -1
+    }
+  ) %>%
+  ungroup()
+
+```
+
+
+```{r}
+# Okay that was horrible, but we are about ready to make the survival model
+
+competency_time <- badge_times$competency_time
+badgeSurv <- cbind(flat_atts,competency_time)
+
+# Just use 2024 for now, since technically 2025 doesn't even have enough time to be competent yet
+
+badgeSurv <- badgeSurv[1:116,]
+
+# Encode the Censorship
+badgeSurv$status <- ifelse(badgeSurv$competency_time != -1, 1, 0)
+# Now replace the -1's with 25 since that was the end of the study
+badgeSurv$competency_time <- ifelse(badgeSurv$competency_time == -1, 25, 
+                                 badgeSurv$competency_time)
+
+# compSurv <-  merge(competency, flat_atts, by = "UniqueID")
+colnames(badgeSurv)[colnames(badgeSurv) == "competency_time"] <- "time"
+
+badgeSurv
+
+```
+
+```{r}
+survfit2(Surv(time, status) ~ 1, data = badgeSurv) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+    ) + 
+  add_confidence_interval() +
+  add_risktable()
+```
+```{r}
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
+
+new_subject <- data.frame(
+  PIPYN = 0,   # example value
+  Early = 0,   # example value
+  Hosp = 1     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+  ) + 
+  add_confidence_interval() 
+```
+
+```{r}
+fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
+
+new_subject <- data.frame(
+  PIPYN = 1,   # example value
+  Early = 0,   # example value
+  Hosp = 0     # example value
+)
+
+surv_curve <- survfit(fit, newdata = new_subject)
+summary(surv_curve)
+# Make a good plot of the curve using survfit2
+survfit2(fit, newdata = new_subject) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Rotation Block",
+    y = "Probability of NOT Earning a Badge in all Categories"
+  ) + 
+  add_confidence_interval() 
+```
+
