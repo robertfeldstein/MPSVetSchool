@@ -220,10 +220,9 @@ baseline_rmse_med<-sd(df25$medical, na.rm = TRUE)
 #train separate models & obtain RMSE for each attribute 
 results25 <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
 
+
 for(i in target_vars){
  labels<- train[[i]] 
- 
-  #impute missing values with the median
  labels[is.na(labels)]<- median(labels, na.rm = TRUE)
  #train data for current attribute
  Dtrain<- as.matrix(train[, predictors]) 
@@ -231,23 +230,29 @@ for(i in target_vars){
   
  xgb_model<- train(target ~. , data = Dtrain, method = "xgbTree",
                    trControl = control, metric = "RMSE")
+ 
+ #get residuals from train set
+ train_pred<- predict(xgb_model, newdata = Dtrain)
+ train_residuals<- labels - train_pred
+
  #get test set predictions
  Dtest<- as.matrix(test[,predictors]) 
  test_labels<- test[[i]]
  pred<- predict(xgb_model, newdata = Dtest )
+ test_residuals<- test_labels - pred
  
- #get performance metrics
+ 
+ #get performance metrics for original model
  metrics<- postResample(pred, test_labels )
  results25 <- rbind(results25, data.frame(
     Attribute = i,
     RMSE = metrics["RMSE"],
     R2 = metrics["Rsquared"]
   ))
- #feature importance
+ #feature importance for original model
  importance_matrix <- xgb.importance(feature_names = predictors, 
                                     model = xgb_model$finalModel)
  xgb.plot.importance(importance_matrix) 
-  
 }
 
 ```
@@ -256,7 +261,7 @@ XGBoost for 2024 Data
 ```{r, warning = FALSE}
 set.seed(0627)
 
-predictors24 <- c("PIPActive", "time","CastrationPerformed", "OvPerformed", "Hosp", "Early")
+predictors24 <- c("PIPYN", "time","CastrationPerformed", "OvPerformed", "Hosp", "Early")
 target_vars<- c("medical", "clinical_reasoning", "professionalism", "collaboration", "procedural")
 df24 <- df24[!is.na(df24$procedural), ]
 #split data into train and test sets
@@ -303,4 +308,46 @@ for(i in target_vars){
   
 }
 
+```
+
+Detrended XGBoost Model for 2024
+```{r}
+results24_detrended<- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+for(i in target_vars){
+  labels<- train24[[i]]
+  labels[is.na(labels)]<- median(labels, na.rm = TRUE)
+ #train data for current attribute
+ Dtrain<- as.matrix(train24[, predictors24]) 
+ Dtrain<- data.frame(Dtrain, target = labels)
+ 
+ #fit model with time as the only predictor
+ xgb_time<- train(target ~ time, data = Dtrain, method = "xgbTree", 
+                  trControl = control, metric = "RMSE")
+ #get residuals for training data
+ train_residuals<- labels- predict(xgb_time, newdata = Dtrain)
+ Dtrain$residuals<- train_residuals
+Dtest<- as.matrix(test24[,predictors24]) 
+test_labels<- test24[[i]]
+ Dtest<- data.frame(Dtest)
+ 
+test_residuals<- test_labels - predict(xgb_time, newdata = Dtest)
+Dtest$residuals<- test_residuals
+
+ 
+ #fit detrended model using residuals and others predictors
+ detrended_model<- train(residuals ~ PIPYN + CastrationPerformed + OvPerformed + Hosp + Early, data = Dtrain, method = "xgbTree", trControl = control, metric = "RMSE")
+ 
+ #get performance metrics
+ pred_residuals<- predict(detrended_model, newdata = Dtest)
+ metrics_detrended<- postResample(pred_residuals, Dtest$residuals)
+ 
+ results24_detrended<- rbind(results24_detrended, data.frame(
+    Attribute = i,
+    RMSE = metrics_detrended["RMSE"],
+    R2 = metrics_detrended["Rsquared"]
+  ))
+ 
+importance_matrix <- xgb.importance(feature_names = c("PIPYN", "CastrationPerformed", "OvPerformed", "Hosp", "Early"), model = detrended_model$finalModel)
+ xgb.plot.importance(importance_matrix) 
+}
 ```
