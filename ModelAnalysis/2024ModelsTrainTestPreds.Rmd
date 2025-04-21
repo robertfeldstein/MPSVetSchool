@@ -1,0 +1,262 @@
+---
+title: "2024ModelsTrainTest"
+author: "Melissa Eckert"
+date: `r Sys.date()`
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+library(nnet)
+library(rsample)
+library(xgboost)
+```
+
+
+Load data & set seed 
+```{r}
+df24<- read_xlsx("../Data/FinalDataSet.xlsx")
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx")
+set.seed(0627)
+```
+
+```{r}
+# Time
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+df24$time <- match(df24$strBlock, labels)
+
+#Get last rotation
+last_rotation <- df24 %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service))
+# Neuters
+neuter_counts <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number = ifelse(is.na(catalog_number), last_service, catalog_number)) %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, 
+              values_from = total,
+              values_fill = 0) %>%
+  rename(Ov = `Ovarioectomy/Ovariohysterectomy`)
+
+# Calculate Cumulative Castrations and Ovariectomies
+df24 <- df24 %>%
+  left_join(neuter_counts, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Ov = coalesce(Ov, 0),
+    Castration = coalesce(Castration, 0),
+    OvPerformed = ave(Ov, UniqueID, FUN = cumsum),
+    CastrationPerformed = ave(Castration, UniqueID, FUN = cumsum)
+  )
+
+```
+
+Train & Test Split (80% of students in train set, 20% in test set)
+
+```{r}
+#remove NA values 
+df24<- df24[!is.na(df24$procedural),]
+#get unique students
+studentids<- unique(df24$UniqueID)
+
+#80% train split ensuring complete obs for each student
+train_students<- sample(studentids, size = 0.8 * length(studentids) )
+train_df = df24 |> filter(UniqueID %in% train_students)
+test_df = df24 |> filter(!(UniqueID %in% train_students))
+```
+
+Linear Regression 
+```{r}
+#Model
+#score ~ time + PIPYN + Ovariectomies + Castrations + early + Hosp
+
+score_variables <- c("medical", "clinical_reasoning", "procedural", "professionalism", "collaboration")
+predictors<- c("time", "PIPYN", "CastrationPerformed", "OvPerformed", "Hosp", "Early")
+
+# One linear model per variable
+linearmodels <- list()
+linearpredictions <- data.frame(UniqueID = test_df$UniqueID)
+linear_rmse <- numeric(length(score_variables))
+names(linear_rmse) <- score_variables
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  form <- as.formula(paste(score, "~ time + PIPYN + OvPerformed + 
+                           CastrationPerformed + Early + Hosp"))
+  #Fit linear model
+  model <- lm(form, data = train_df)
+  linearmodels[[score]] <- model
+#Generate predictions for each model using test set 
+  linearpredictions[[score]] <- predict(model, newdata = test_df)
+#Get RMSE
+  linear_rmse[score]<-sqrt(mean((test_df[[score]] - linearpredictions[[score]])^2, na.rm=TRUE))
+}
+
+```
+
+Logistic Regression
+```{r}
+#Model
+#Competency ~ time + PIPYN + Ovariectomies + Castrations + early + Hosp
+
+train_df_comp <- train_df |>
+    mutate(across(all_of(score_variables), 
+                  ~ factor(as.integer(. >= 4), levels = c(0,1)) )) 
+test_df_comp <- test_df |>
+    mutate(across(all_of(score_variables), 
+                  ~ factor(as.integer(. >= 4), levels = c(0,1)) )) 
+# One logistic model per variable
+logisticmodels <- list()
+logisticpredictions <- data.frame(UniqueID = test_df$UniqueID)
+logistic_accuracy <- numeric(length(score_variables))
+names(logistic_accuracy) <- score_variables
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  form <- as.formula(paste(score, "~ time + PIPYN + OvPerformed + 
+                           CastrationPerformed + Early + Hosp"))
+  #Fit model
+  model <- glm(form, data = train_df_comp, family = "binomial")
+  logisticmodels[[score]] <- model
+#Generate predictions for each model using test set 
+  pred_binary<- ifelse(predict(model, newdata = test_df_comp, type = "response") >= 0.5, 1, 0)
+  logisticpredictions[[score]] <- pred_binary
+#Get accuracy
+  logistic_accuracy[[score]]<-mean(test_df_comp[[score]] == pred_binary, na.rm=TRUE)
+}
+
+
+```
+
+XGBoost
+
+```{r}
+# One xgboost model per variable
+xgbmodels <- list()
+xgbpredictions <- data.frame(UniqueID = test_df$UniqueID)
+xgb_rmse <- numeric(length(score_variables))
+names(xgb_rmse) <- score_variables
+
+for (i in seq_along(score_variables)){
+  score<- score_variables[i]
+  Dtrain<- xgb.DMatrix(data = as.matrix(train_df[,predictors]),
+                       label = train_df[[score]])
+  Dtest<- xgb.DMatrix(data = as.matrix(test_df[,predictors]),
+                      label = test_df[[score]])
+  #Fit model
+  model <- xgboost(data = Dtrain, objective = "reg:squarederror", nrounds = 50, verbose = 0 )
+  xgbmodels[[score]] <- model
+#Generate predictions for each model using test set 
+  xgbpredictions[[score]] <- predict(model, newdata = Dtest)
+#Get RMSE
+  xgb_rmse[score]<-sqrt(mean((test_df[[score]] - xgbpredictions[[score]])^2, na.rm=TRUE))
+}
+
+
+```
+
+XGBoost Classifier
+
+```{r}
+xgbclassifiers <- list()
+xgb_c_predictions <- data.frame(UniqueID = test_df$UniqueID)
+xgb_accuracy <- numeric(length(score_variables))
+names(xgb_accuracy) <- score_variables
+
+for (i in seq_along(score_variables)){
+  score<- score_variables[i]
+  Dtrain<- xgb.DMatrix(data = as.matrix(train_df_comp[,predictors]),
+                       label = as.numeric(as.character(train_df_comp[[score]])))
+  Dtest<- xgb.DMatrix(data = as.matrix(test_df_comp[,predictors]),
+                      label = as.numeric(as.character(test_df_comp[[score]])))
+  #Fit model
+  model <- xgboost(data = Dtrain, objective = "binary:logistic", nrounds = 50, verbose = 0 )
+  xgbclassifiers[[score]] <- model
+#Generate predictions for each model using test set 
+  pred_binary<- ifelse(predict(model, newdata = Dtest, type = "response") >= 0.5, 1, 0)
+  xgb_c_predictions[[score]] <- pred_binary
+#Get accuracy
+  xgb_accuracy[[score]]<-mean(test_df_comp[[score]] == pred_binary, na.rm=TRUE)
+}
+```
+
+Multinomial Logit
+
+```{r, warning = FALSE}
+multinom_models <- list()
+multinompredictions <- data.frame(UniqueID = test_df$UniqueID)
+multinom_accuracy <- numeric(length(score_variables))
+names(multinom_accuracy) <- score_variables
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  train_df_fct<- train_df
+  test_df_fct<- test_df
+  train_df_fct[[score]]<- factor(train_df_fct[[score]], levels = 1:5)
+  test_df_fct[[score]]<- factor(test_df_fct[[score]], levels = 1:5)
+  
+  form <- as.formula(paste(score, "~ time + PIPYN + OvPerformed + 
+                           CastrationPerformed + Early + Hosp"))
+  #Fit model
+  model <- multinom(form, data = train_df_fct, trace = FALSE)
+  multinom_models[[score]] <- model
+#Generate predictions for each model using test set 
+  pred<- predict(model, newdata = test_df_fct, type = "class")
+  multinompredictions[[score]] <- pred
+#Get accuracy
+  multinom_accuracy[[score]]<-mean(as.character(test_df_fct[[score]]) == as.character(pred), na.rm=TRUE)
+}
+
+
+```
+
+Detrended Linear Regression & XGBoost
+
+```{r}
+predictors_detrended<- c("PIPYN", "CastrationPerformed", "OvPerformed", "Hosp", "Early")
+
+detrended_linearmodels<- list()
+detrended_linearpredictions<-data.frame(UniqueID = test_df$UniqueID)
+detrended_linear_rmse<-numeric(length(score_variables))
+names(detrended_linear_rmse)<- score_variables
+
+detrended_xgbmodels <- list()
+detrended_xgbpredictions <- data.frame(UniqueID = test_df$UniqueID)
+detrended_xgb_rmse <- numeric(length(score_variables))
+names(detrended_xgb_rmse) <- score_variables
+
+for (i in seq_along(score_variables)){  
+  score<- score_variables[i]
+  #fit linear model with time only and get residuals
+  time_model<- lm(as.formula(paste(score, "~time")), data = train_df)
+  train_df$residuals<- resid(time_model)
+  
+  #fit detrended model with residuals (excluding time)
+  model<- lm(residuals ~ PIPYN + OvPerformed + 
+                           CastrationPerformed + Early + Hosp, data = train_df)
+  detrended_linearmodels[[score]]<- model
+  #generate residual predictions using test set
+  detrended_linearpredictions[[score]]<- predict(model, newdata = test_df)
+  
+  #compute residuals for test set
+  test_resid<- test_df[[score]] - predict(time_model, newdata = test_df )
+  detrended_linear_rmse[score]<-sqrt(mean((test_resid - detrended_linearpredictions[[score]])^2, na.rm=TRUE))
+  
+  #fit xgb model with residuals (excluding time)
+  Dtrain<- xgb.DMatrix(data = as.matrix(train_df[,predictors_detrended]),
+                       label = train_df$residuals)
+  Dtest<- xgb.DMatrix(data = as.matrix(test_df[,predictors_detrended]))
+  xgb_model <- xgboost(data = Dtrain, objective = "reg:squarederror", nrounds = 50, verbose = 0 )
+  detrended_xgbmodels[[score]] <- xgb_model
+#Generate predictions for each model using test set
+  detrended_xgbpredictions[[score]] <- predict(xgb_model, newdata = Dtest)
+#Get RMSE
+  detrended_xgb_rmse[score]<-sqrt(mean((test_resid - detrended_xgbpredictions[[score]])^2, na.rm=TRUE))
+}
+```
