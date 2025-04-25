@@ -389,7 +389,43 @@ There are potentially other ways of representing competency; visualize boxplots 
 boxplot(df$medical ~ df$PIPActive, ylab = "Medical Scores", xlab = "PIP Status", main = "Medical Scores by PIP Status")
 ```
 
+```{r}
 
+# Updated Combined Dataset
+library(readxl)
+df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+# Convert strBlock column to integers
+df$time<- label_mapping[df$strBlock]
+# Rename PIPOverall to PIPYN
+df <- df %>%
+  rename(PIPYN = PIPOverall) %>%
+  mutate(PIPYN = as.numeric(PIPYN))
+df$Post <- ifelse(df$time > 6, 1, 0)
+didreg1 = lm(Average ~ PIPYN*Post, data = df)
+summary(didreg1)
+```
 
+```{r}
+# Install if needed
+#install.packages(c("broom", "kableExtra", "knitr"))
+
+library(broom)
+library(kableExtra)
+library(knitr)
+
+tidy(didreg1) %>%
+  kable(digits = 3, caption = "Regression Results") %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r}
+model <- feols(Average ~ PIPYN | UniqueID + time, vcov = ~UniqueID, data = df)
+summary(model)
+```
 
 

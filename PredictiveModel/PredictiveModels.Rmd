@@ -22,9 +22,8 @@ library(ggsurvfit)
 ```
 
 ```{r}
+df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
 
-df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
-df25 <- read_xlsx("../Data/2025Data.xlsx", sheet=1)
 labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
             "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
             "D3", "D4", "D5", "D6")
@@ -33,14 +32,11 @@ labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4",
 label_mapping <- setNames(1:length(labels), labels)
 
 # Convert strBlock column to integers
-df24$time<- label_mapping[df24$strBlock]
-df25$time <- label_mapping[df25$strBlock]
-```
-
-```{r}
-# Combine df24 and df25 
-colnames(df25) <- colnames(df24)
-df <- rbind(df24,df25)
+df$time<- label_mapping[df$strBlock]
+# Rename PIPOverall to PIPYN
+df <- df %>%
+  rename(PIPYN = PIPOverall) %>%
+  mutate(PIPYN = as.numeric(PIPYN))
 ```
 
 ```{r}
@@ -92,27 +88,6 @@ df <- df %>%
 df$CastrationPerformed <- ave(df$Castration, df$UniqueID, FUN = cumsum)
 df$OvPerformed <- ave(df$Ov, df$UniqueID, FUN = cumsum)
 
-skill_cat <- dfproc %>%
-  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
-  mutate(catalog_number_fixed = if_else(is.na(catalog_number), last_service, catalog_number)) %>%
-  dplyr::select(ID, catalog_number = catalog_number_fixed, skill_category, total_number_performed) %>%
-  group_by(ID, catalog_number, skill_category) %>%
-  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = skill_category, values_from = total, values_fill = 0)
-
-df <- df %>% 
-  left_join(skill_cat, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
-  mutate(
-    `Surgical Skills` = replace_na(`Surgical Skills`, 0),
-    `Procedural Skills` = replace_na(`Procedural Skills`, 0),
-    `Dental Skills` = replace_na(`Dental Skills`, 0),
-    `Anesthesia Skills` = replace_na(`Anesthesia Skills`, 0)
-  )
-
-df$Surgical_Per <- ave(df$`Surgical Skills`, df$UniqueID, FUN = cumsum)
-df$Procedural_Per <- ave(df$`Procedural Skills`, df$UniqueID, FUN = cumsum)
-df$Dental_Per <- ave(df$`Dental Skills`, df$UniqueID, FUN = cumsum)
-df$Anesthesia_Per <- ave(df$`Anesthesia Skills`, df$UniqueID, FUN = cumsum)
 ```
 
 
@@ -149,17 +124,19 @@ theta3 <- thresholds[3]
 beta_time <- betas["time"]
 beta_Early <- betas["Early"]
 beta_PIPYN <- betas["PIPYN"]
+beta_Hosp <- betas["Hosp"]
 
 # Set covariate values
 Early_val <- 0
 PIPYN_val <- 1
+Hosp_val <- 1
 
 # Target cumulative probability:
 target_prob <- 0.8
 target_logit <- -qlogis(1-target_prob)  
 
 # Solve for time
-numerator <- theta3 + target_logit - (beta_Early * Early_val + beta_PIPYN * PIPYN_val)
+numerator <- theta3 + target_logit - (beta_Hosp * Hosp_val + beta_Early * Early_val + beta_PIPYN * PIPYN_val)
 time_to_reach <- numerator / beta_time
 
 time_to_reach
@@ -196,7 +173,17 @@ survival_set <- df %>%
 # Encode the Censorship
 survival_set$status <- ifelse(survival_set$timeSuccess != -1, 1, 0)
 # Now replace the -1's with 25 since that was the end of the study
-survival_set$timeSuccess <- ifelse(survival_set$timeSuccess == -1, 25, survival_set$timeSuccess)
+# lookup table
+max_times <- df %>%
+  group_by(UniqueID) %>%
+  summarize(max_time = max(time, na.rm = TRUE))
+
+survival_set <- survival_set %>%
+  left_join(max_times, by = "UniqueID") %>%
+  mutate(timeSuccess = ifelse(timeSuccess == -1, max_time, timeSuccess)) %>%
+  select(-max_time)  # Remove the temporary column
+
+# survival_set$timeSuccess <- ifelse(survival_set$timeSuccess == -1, 25, survival_set$timeSuccess)
 
 # Now join on UniqueID with df to get PIPYN, Early, Hosp
 
@@ -212,7 +199,7 @@ head(medSurv)
 ```
 
 ```{r}
-Surv(medSurv$time, medSurv$status)[1:30]
+Surv(medSurv$time, medSurv$status)[120:140]
 ```
 
 ```{r}
@@ -465,15 +452,21 @@ badge_times <- badge_times%>%
 competency_time <- badge_times$competency_time
 badgeSurv <- cbind(flat_atts,competency_time)
 
-# Just use 2024 for now, since technically 2025 doesn't even have enough time to be competent yet
-
-badgeSurv <- badgeSurv[1:116,]
-
 # Encode the Censorship
 badgeSurv$status <- ifelse(badgeSurv$competency_time != -1, 1, 0)
+
+max_times <- df %>%
+  group_by(UniqueID) %>%
+  summarize(max_time = max(time, na.rm = TRUE))
+
+badgeSurv <- badgeSurv %>%
+  left_join(max_times, by = "UniqueID") %>%
+  mutate(competency_time = ifelse(competency_time == -1, max_time, competency_time)) %>%
+  select(-max_time)  # Remove the temporary column
+
 # Now replace the -1's with 25 since that was the end of the study
-badgeSurv$competency_time <- ifelse(badgeSurv$competency_time == -1, 25, 
-                                 badgeSurv$competency_time)
+# badgeSurv$competency_time <- ifelse(badgeSurv$competency_time == -1, 25, 
+#                                  badgeSurv$competency_time)
 
 # compSurv <-  merge(competency, flat_atts, by = "UniqueID")
 colnames(badgeSurv)[colnames(badgeSurv) == "competency_time"] <- "time"
@@ -487,7 +480,7 @@ survfit2(Surv(time, status) ~ 1, data = badgeSurv) %>%
   ggsurvfit() +
   labs(
     x = "Rotation Block",
-    y = "Probability of NOT Earning a Badge in all Categories"
+    y = "Probability of Failing to Obtain Badges"
     ) + 
   add_confidence_interval() +
   add_risktable()
@@ -497,7 +490,7 @@ fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
 
 new_subject <- data.frame(
   PIPYN = 0,   # example value
-  Early = 0,   # example value
+  Early = 1,   # example value
   Hosp = 1     # example value
 )
 
@@ -518,7 +511,7 @@ fit <- coxph(Surv(time, status) ~ PIPYN + Early + Hosp, data = badgeSurv)
 
 new_subject <- data.frame(
   PIPYN = 1,   # example value
-  Early = 0,   # example value
+  Early = 1,   # example value
   Hosp = 0     # example value
 )
 
@@ -533,4 +526,12 @@ survfit2(fit, newdata = new_subject) %>%
   ) + 
   add_confidence_interval() 
 ```
+
+```{r}
+summary(fit)
+```
+
+
+
+
 

@@ -1,0 +1,237 @@
+---
+title: "ARModeling"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(pder)
+library(plm)
+library(pgmm)
+library(dplyr)
+library(tidyr)
+library(broom)
+```
+
+
+```{r}
+# Load all data
+df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# Get time
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+df$time <- match(df$strBlock, labels)
+
+# Grab last rotation
+last_rotation <- df %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service))
+
+# Neuters
+neuter_counts <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number = ifelse(is.na(catalog_number), last_service, catalog_number)) %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, 
+              values_from = total,
+              values_fill = 0) %>%
+  rename(Ov = `Ovarioectomy/Ovariohysterectomy`)
+
+# Calculate Cumulative Castrations and Ovariectomies
+df <- df %>%
+  left_join(neuter_counts, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Ov = coalesce(Ov, 0),
+    Castration = coalesce(Castration, 0),
+    OvPerformed = ave(Ov, UniqueID, FUN = cumsum),
+    CastrationPerformed = ave(Castration, UniqueID, FUN = cumsum)
+  )
+
+# Rename PIPOverall to PIPYN
+df <- df %>%
+  rename(PIPYN = PIPOverall)
+
+# Split df back into df24 and df25
+df24 <- df[df$UniqueID<=117,]
+df25 <- df[df$UniqueID>117,]
+# Also filter df25 so that all the times are <= 21
+df25 <- df25[df25$time <= 21,]
+
+# Drop the other dataframes to clear the environment
+keep_objects <- c("df", "df24", "df25")
+rm(list = setdiff(ls(), keep_objects))
+
+```
+
+
+
+
+```{r}
+df24s <- df24[, c("UniqueID", "medical", "Hosp", "Early", "PIPYN", "time", "OvPerformed", "CastrationPerformed")]
+# Use complete cases
+df24s <- df24s[complete.cases(df24s), ]
+#df24s$time <- as.numeric(df24s$time)
+df24s$time_copy <- df24s$time
+# Remove df24s$time
+panel_OLS <- plm('medical ~ Hosp + Early + PIPYN + time_copy + OvPerformed + CastrationPerformed',
+                 df24s,
+                 index = c("UniqueID", "time"),
+                 model = 'pooling')
+
+# Output Coefficients
+summary(panel_OLS)
+
+```
+
+```{r}
+# Calculate Training MSE 
+training_mse <- mean(residuals(panel_OLS)^2)
+# Get the Adjusted R^2
+training_r2 <- summary(panel_OLS)$r.squared[2]
+
+# Make a df25 that does not have missing values for medical (making this matrix needs to be identical)
+df25med <- df25[!is.na(df25$medical), ]
+df25med <- df25med[, c("UniqueID", "time", "medical", "Hosp", "Early", "PIPYN", "OvPerformed", "CastrationPerformed")]
+df25med <- df25med[complete.cases(df25med), ]
+df25med$time_copy <- df25med$time
+df25med$time <- as.numeric(df25med$time)
+df25med$time_copy <- as.numeric(df25med$time_copy)
+
+```
+
+
+```{r}
+# Metrics
+prediction <- predict(panel_OLS, newdata = df25med)
+# Testing MSE
+testing_mse <- mean((prediction-df25med$medical)^2)
+# Adjusted r2
+ss_res <- sum((df25med$medical - prediction)^2)
+ss_tot <- sum((df25med$medical - mean(df25med$medical))^2)
+r2 <- 1 - ss_res / ss_tot
+n <- nrow(df25med)
+p <- length(panel_OLS$coefficients) - as.numeric("(Intercept)" %in% names(panel_OLS$coefficients))
+adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
+
+print(training_mse)
+print(training_r2)
+print(testing_mse)
+print(adj_r2)
+```
+
+
+```{r}
+# A visualization of our plot and predictions
+plot(as.vector(prediction), ylim = c(1,5))
+points(as.vector(df25med$medical), col="red")
+
+```
+
+
+```{r}
+
+# Instead of doing this, we should make a training and testing set for df24s, because you can't use within on new subjects
+# Random 80%, 20% split
+df24train <- df24s %>%
+  group_by(UniqueID) %>%
+  sample_frac(0.8) %>%
+  ungroup()
+df24test <- df24s %>%
+  anti_join(df24train, by = c("UniqueID", "time"))
+
+panel_within <- plm('medical ~ Hosp + Early + PIPYN + time_copy + CastrationPerformed + OvPerformed',
+                    df24train,
+                    index = c("UniqueID", "time"),
+                    model = 'within')
+
+summary(panel_within)
+
+training_mse <- mean(residuals(panel_within)^2)
+training_r2 <- summary(panel_within)$r.squared[2]
+```
+
+Because PIPYN, Early, and Hosp are time-invariant, a within estimation model does not output any of the coefficients.
+The only coefficients that get output are the ones that change overtime.
+
+```{r}
+print(training_mse)
+print(training_r2)
+```
+
+
+```{r}
+# Metrics
+# df24test <- pdata.frame(df24test, index = c("UniqueID", "time"))
+# prediction <- predict(panel_within, newdata = df24test)
+# # Testing MSE
+# testing_mse <- mean((prediction-df25med$medical)^2)
+# # Adjusted r2
+# ss_res <- sum((df25med$medical - prediction)^2)
+# ss_tot <- sum((df25med$medical - mean(df25med$medical))^2)
+# r2 <- 1 - ss_res / ss_tot
+# n <- nrow(df25med)
+# p <- length(panel_within$coefficients) - as.numeric("(Intercept)" %in% names(panel_OLS$coefficients))
+# adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
+# 
+# print(training_mse)
+# print(training_r2)
+# print(testing_mse)
+# print(adj_r2)
+
+# Manually predict from fixed effects model
+coefs <- coef(panel_within)
+
+X_test <- model.matrix(~ Hosp + Early + PIPYN + time_copy + CastrationPerformed + OvPerformed, 
+                       data = df24test)
+
+# Drop intercept if present (since 'within' model doesn’t include one)
+if ("(Intercept)" %in% colnames(X_test)) {
+  X_test <- X_test[, setdiff(colnames(X_test), "(Intercept)"), drop = FALSE]
+}
+
+# Ensure column order matches
+X_test <- X_test[, names(coefs), drop = FALSE]
+
+# Compute predictions manually
+prediction <- as.numeric(X_test %*% coefs)
+
+# Mean Squared Error (MSE) on test set
+testing_mse <- mean((prediction - df24test$medical)^2)
+
+# R-squared and Adjusted R-squared
+ss_res <- sum((df24test$medical - prediction)^2)
+ss_tot <- sum((df24test$medical - mean(df24test$medical))^2)
+r2 <- 1 - ss_res / ss_tot
+
+# Adjusted R²: Note — no intercept in within model
+n <- nrow(df24test)
+p <- length(coefs)
+adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
+
+# Optional: Training performance (if available)
+# If you computed training predictions manually, you can do the same for training_mse and training_r2
+# Otherwise, omit the print statements or replace with actual values
+
+print(testing_mse)
+print(r2)
+print(adj_r2)
+
+
+```
+
+It is not possible to actually make predictions on new individuals. So this code will not run unfortunately.
+
+
