@@ -15,12 +15,15 @@ library(readxl)
 library(nnet)
 library(dplyr)
 library(tidyr)
+library(caret)
+library(xgboost)
+library(pROC)
 ```
 
 
 ```{r}
 # Load in the Datasets, categorize them the same way
-
+library(readxl)
 # Load all data
 df24 <- read_xlsx("../Data/FinalDataSet.xlsx", sheet = 1)
 df25 <- read_xlsx("../Data/2025Data.xlsx", sheet=1)
@@ -74,6 +77,8 @@ rm(list = setdiff(ls(), keep_objects))
 ```
 
 
+\newpage
+
 ## Linear Regression
 
 ```{r}
@@ -119,31 +124,846 @@ for (i in seq_along(score_variables)) {
 linear_rmse
 ```
 
+```{r}
+
+for (model in linearmodels){
+  print(mean(residuals(model)^2))
+}
+
+```
+
+
+
+\newpage
 
 ## XGBoost
 
+
+
 ```{r}
-# First a general XGBoost Model that predicts continuous values
-# Then an XGBoost model that classifies if the score >= 4
+xgbmse <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+
+# Remove NA values from procedural before creating folds
+set.seed(123)
+fold_data <- df24$procedural
+fold_data <- fold_data[!is.na(fold_data)]
+folds <- createFolds(fold_data, k = 5, list = TRUE)
+predictors24 <- c("time",  "PIPYN" ,  "OvPerformed",   
+                           "CastrationPerformed" , "Early")
+
+for(i in score_variables){
+  # Remove NA
+  labels <- df24[[i]]
+  labels[is.na(labels)] <- median(labels, na.rm = TRUE)
+  
+  # 2024 Training Set
+  dtrain <- xgb.DMatrix(data = as.matrix(df24[, predictors24]), 
+                       label = labels)
+  
+  # Model Parameters
+  params <- list(
+    objective = "reg:squarederror",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  
+  # Train on 2024
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    verbose = 0
+  )
+  
+  # Predictions
+  dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24]))
+  pred <- predict(xgb_model, dtest)
+  
+  # MSE
+  test_labels <- df25[[i]]
+  rmse <- sqrt(mean((pred - test_labels)^2, na.rm = TRUE))
+  ss_total <- sum((test_labels - mean(test_labels, na.rm = TRUE))^2, na.rm = TRUE)
+  ss_residual <- sum((test_labels - pred)^2, na.rm = TRUE)
+  r_squared <- 1 - ss_residual/ss_total
+  
+  # Update - fixed to use xgbmse instead of results24
+  xgbmse <- rbind(xgbmse, data.frame(
+    Attribute = i,
+    RMSE = rmse,
+    R2 = r_squared
+  ))
+}
+
+print(xgbmse)
 ```
 
+```{r}
+# For later, but repeat XGBoost Classifer
+
+# Here we are making a classifier, so gotta convert things first
+create_xgb_model <- function(df, var){
+  # 4,5 is competent
+  var_comp_name <- paste0(var, "_comp")
+  df[[var_comp_name]] <- ifelse(df[[var]] >= 4, 1, 0)
+  # XGboost will crash if the dataset contains NA
+  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early")
+  complete_cases <- complete.cases(df[, c(var_comp_name, predictors)])
+  # Okay now we can actually use XGBoost
+  df_complete <- df[complete_cases, ]
+  # Make a special matrix
+  dtrain <- xgb.DMatrix(
+    data = as.matrix(df_complete[, predictors]), 
+    label = df_complete[[var_comp_name]]
+  )
+  # Looked this up, but here's a way to set up XGBoost for classifiers
+  params <- list(
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  # Train XGBoost model
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    # Turn off the noise
+    verbose = 0
+  )
+  # Output the model
+  return(xgb_model)
+}
+
+# Create XGBoost models for each variable
+xgb_models <- list()
+target_vars <- score_variables
+for (i in seq_along(target_vars)){
+  var <- target_vars[i]
+  xgb_models[[i]] <- create_xgb_model(df24, var)
+  # Name the list
+  names(xgb_models)[i] <- var  
+}
+
+# Predict the model and output the results
+predict_and_evaluate_xgb <- function(model_list, new_data, target_vars) {
+  # Empty df to store
+  results <- data.frame(Variable = character(), Accuracy = numeric())
+  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early")
+  # Loop through vars
+  for (i in seq_along(target_vars)) {
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    # Create the binary outcome in test data
+    var_comp_name <- paste0(var, "_comp")
+    new_data[[var_comp_name]] <- ifelse(new_data[[var]] >= 4, 1, 0)
+    # Create test data matrix
+    dtest <- xgb.DMatrix(data = as.matrix(new_data[, predictors]))
+    # Get predictions (probabilities)
+    pred_prob <- predict(model, dtest)
+    # Convert to binary predictions
+    pred_class <- ifelse(pred_prob >= 0.5, 1, 0)
+    # Calculate accuracy
+    actual <- new_data[[var_comp_name]]
+    accuracy <- mean(pred_class == actual, na.rm = TRUE)
+    # Store results
+    results <- rbind(results, data.frame(
+      Variable = var,
+      Accuracy = accuracy
+    ))
+  }
+  return(results)
+}
+
+# Run prediction and evaluation on df25
+xgb_class_results <- predict_and_evaluate_xgb(xgb_models, df25, target_vars)
+print(xgb_class_results)
+
+```
+
+\newpage
 
 ## Logit
 
 ```{r}
 
+library(nnet)
+
+create_logit_model <- function(df, var){
+  # Create binary outcome variable
+  var_comp_name <- paste0(var, "_comp")
+  df[[var_comp_name]] <- ifelse(df[[var]] >= 4, 1, 0)
+  
+  # Create formula using the binary outcome
+  form <- as.formula(paste(var_comp_name, "~ time + PIPYN + OvPerformed + 
+                          CastrationPerformed + Early"))
+  logit <- glm(form, data = df, family = binomial)
+  return(logit)
+}
+
+logitmodels <- list()
+target_vars <- score_variables
+for (i in seq_along(target_vars)){
+  var <- target_vars[i]
+  logitmodels[[i]] <- create_logit_model(df24, var)
+  names(logitmodels)[i] <- var  # Name the list elements
+}
+
+# Now test this on the 2025 data
+
+predict_and_evaluate <- function(model_list, new_data, target_vars) {
+  # Empty results
+  results <- data.frame(Variable = character(), Accuracy = numeric())
+  # Loop through vars
+  for (i in seq_along(target_vars)) {
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    # Create the same binary outcome in the test data
+    var_comp_name <- paste0(var, "_comp")
+    new_data[[var_comp_name]] <- ifelse(new_data[[var]] >= 4, 1, 0)
+    # Get predictions (probabilities)
+    pred_prob <- predict(model, newdata = new_data, type = "response")
+    # Convert to binary predictions (1 if probability >= 0.5)
+    pred_class <- ifelse(pred_prob >= 0.5, 1, 0)
+    # Calculate metrics
+    actual <- new_data[[var_comp_name]]
+    accuracy <- mean(pred_class == actual, na.rm = TRUE)
+    # Store results
+    results <- rbind(results, data.frame(
+      Variable = var,
+      Accuracy = accuracy
+    ))
+  }
+  return(results)
+}
+
+# Run prediction and evaluation on df25
+logit_results <- predict_and_evaluate(logitmodels, df25, target_vars)
+print(logit_results)
+
 ```
-
-
-## Multinomial Logistic
 
 ```{r}
+# Add AUC measures to the Logit and XGBoost Classifiers 
+
+for (logit in logitmodels){
+  # Calculate accuracy from each logit model
+  pred_prob <- predict(logit, newdata = df25, type = "response")
+  # Convert to binary predictions
+  pred_class <- ifelse(pred_prob >= 0.5, 1, 0)
+  # print(pred_class)
+  # accuracy <- mean(pred_class == df25[[paste0(names(logit), "_comp")]], na.rm = TRUE)
+  # print(accuracy)
+  # Calculate AUC
+  # actual <- df25[[paste0(names(logit), "_comp")]]
+  # auc <- pROC::auc(pROC::roc(actual, pred_prob))
+  # # Store results
+  # logit_results <- rbind(logit_results, data.frame(
+  #   Variable = names(logit),
+  #   AUC = auc
+  # ))
+  # print(logit_results)
+}
+
+# Do another model run with all the data (add hospital back to 2025, but lose those last 6 rotations)
+# Drop the detrended
+# Add AUC scores instead of accuracy
 
 ```
+
+
+
+\newpage
 
 ## Detrended Datasets
 
 ```{r}
 
+# Fit a base linear model on 2024 just on time
+
+# Loop over the score variables
+score_variables <- c("medical", "clinical_reasoning", "procedural", "professionalism", "collaboration")
+
+# One linear model per variable
+timemodels <- list()
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  form <- as.formula(paste(score, "~ time"))
+  model <- lm(form, data = df24)
+  timemodels[[i]] <- model
+  names(timemodels)[i] <- score
+}
+
+# Now use these linear models to find residuals
+residual_list <- list()
+for (i in seq_along(timemodels)){
+  score <- score_variables[i]
+  residual_list[[i]] <- residuals(timemodels[[i]])
+  names(residual_list)[i] <- score
+}
+
 ```
+
+```{r}
+# Loop over the score variables
+score_variables <- c("medical", "clinical_reasoning", "procedural", "professionalism", "collaboration")
+
+# Create a new dataframe for each model, containing only complete cases with residuals
+residual_dfs <- list()
+
+for (score in score_variables) {
+  # Get complete cases for this score variable
+  complete_idx <- !is.na(df24[[score]]) & !is.na(df24$time)
+  
+  # Create a subset dataframe with only complete cases
+  temp_df <- df24[complete_idx, ]
+  
+  # Add residuals to this dataframe
+  temp_df[[paste0(score, "_residual")]] <- residuals(timemodels[[score]])
+  
+  # Store the dataframe
+  residual_dfs[[score]] <- temp_df
+}
+
+# One linear model per variable
+linearmodels <- list()
+
+for (i in seq_along(score_variables)) {
+  score <- score_variables[i]
+  # Use the complete-cases dataframe for this score
+  model_df <- residual_dfs[[score]]
+  
+  # Create formula using the residual column
+  form <- as.formula(paste0(score, "_residual ~ PIPYN + OvPerformed + CastrationPerformed + Early"))
+  
+  # Fit model
+  model <- lm(form, data = model_df)
+  linearmodels[[i]] <- model
+  names(linearmodels)[i] <- score
+}
+
+# Now use these linear models to make predictions using the 2025 data
+linearpredictions <- data.frame(UniqueID = df25$UniqueID)
+for (score in score_variables) {
+  model <- linearmodels[[score]]
+  time_model <- timemodels[[score]]
+  time_prediction <- predict(time_model, newdata = df25)
+  residual_prediction <- predict(model, newdata = df25)
+  linearpredictions[[score]] <- time_prediction + residual_prediction
+}
+
+# Now calculate RMSE 
+linear_rmse <- numeric(length(score_variables))
+names(linear_rmse) <- score_variables
+
+for (i in seq_along(score_variables)) {
+  score <- score_variables[i]
+  linear_rmse[i] <- sqrt(mean((df25[[score]] - linearpredictions[[score]])^2, na.rm=TRUE))
+}
+
+linear_rmse
+```
+It looks like the detrended model actually somewhat outperforms the standard model. Interesting!
+
+```{r}
+xgbmse <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric())
+predictors24_no_time <- c("PIPYN", "OvPerformed", "CastrationPerformed", "Early")
+
+set.seed(123)
+
+for(i in score_variables){
+  #dataframe without NAs for this variable
+  complete_idx <- !is.na(df24[[i]]) & !is.na(df24$time)
+  temp_df24 <- df24[complete_idx, ]
+  #Get residuals from the time model
+  time_model <- timemodels[[i]]
+  residuals <- residuals(time_model)
+  #XGBoost on the residuals
+  dtrain <- xgb.DMatrix(data = as.matrix(temp_df24[, predictors24_no_time]), 
+                      label = residuals)
+  # Model Parameters (standard)
+  params <- list(
+    objective = "reg:squarederror",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  #Call training
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    verbose = 0
+  )
+  # Get linear time prediction
+  time_prediction <- predict(time_model, newdata = df25)
+  # Residual prediction with XGBoost
+  dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24_no_time]))
+  residual_pred <- predict(xgb_model, dtest)
+  # Combined prediction = time trend + residual
+  combined_pred <- time_prediction + residual_pred
+  # Calculate metrics
+  test_labels <- df25[[i]]
+  rmse <- sqrt(mean((combined_pred - test_labels)^2, na.rm = TRUE))
+  # Formula for r_squared value
+  ss_total <- sum((test_labels - mean(test_labels, na.rm = TRUE))^2, na.rm = TRUE)
+  ss_residual <- sum((test_labels - combined_pred)^2, na.rm = TRUE)
+  r_squared <- 1 - ss_residual/ss_total
+  # Append to the dataframe
+  xgbmse <- rbind(xgbmse, data.frame(
+    Attribute = i,
+    RMSE = rmse,
+    R2 = r_squared
+  ))
+}
+
+print(xgbmse)
+```
+
+\newpage
+
+## Multinomial Logistic
+(Do some research if this even makes sense)
+
+```{r}
+
+# Store the models
+# This is basically going to be the same as the logistic regression code
+multinom_models <- list()
+for (i in seq_along(score_variables)) {
+  var <- score_variables[i]
+  #Formula
+  form <- as.formula(paste(var, "~ time + PIPYN + OvPerformed + CastrationPerformed + Early"))
+  # Train multinomial model
+  # Add more iterations
+  model <- multinom(form, data = df24, maxit = 500, trace = FALSE)
+  # Store the model
+  multinom_models[[i]] <- model
+  # Name the model
+  names(multinom_models)[i] <- var
+}
+
+# Basically too many different kinds of metrics to use, so I calculated them all
+evaluate_multinom_models <- function(model_list, new_data, target_vars) {
+  results <- data.frame(
+    Variable = character(), 
+    # This we know
+    RMSE = numeric(),
+    # This is pure accuracy
+    Accuracy = numeric(),
+    # This one seems like cheating
+    Within1Accuracy = numeric()
+  )
+  
+  for (i in seq_along(target_vars)) {
+    # Same loop as all the other loops
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    # Same as logistic
+    pred_probs <- predict(model, newdata = new_data, type = "probs")
+    # Get classes (unique values of the score variable)
+    classes <- as.numeric(colnames(pred_probs))
+    # Calculate expected score as weighted average of class probabilities
+    # Again, I don't know if this is allowed but it almost makes sense.
+    expected_scores <- rep(0, nrow(new_data))
+    for (j in seq_along(classes)) {
+      expected_scores <- expected_scores + classes[j] * pred_probs[, j]
+    }
+    # Okay this is exactly the same as logistic
+    pred_class <- predict(model, newdata = new_data, type = "class")
+    pred_class <- as.numeric(as.character(pred_class))
+    # Calculate metrics
+    # Get true data
+    actual <- new_data[[var]]
+    complete_cases <- !is.na(actual)
+    # RMSE
+    rmse <- sqrt(mean((expected_scores[complete_cases] - actual[complete_cases])^2, na.rm = TRUE))
+    # Exact accuracy
+    accuracy <- mean(pred_class[complete_cases] == actual[complete_cases], na.rm = TRUE)
+    # Within 1 accuracy (this is just too much)
+    within1 <- mean(abs(pred_class[complete_cases] - actual[complete_cases]) <= 1, na.rm = TRUE)
+    # Add results
+    results <- rbind(results, data.frame(
+      Variable = var,
+      RMSE = rmse,
+      Accuracy = accuracy,
+      Within1Accuracy = within1
+    ))
+  }
+  return(results)
+}
+# Evaluate models on 2025 data
+multinom_results <- evaluate_multinom_models(multinom_models, df25, score_variables)
+print(multinom_results)
+```
+
+## New Model Completely
+
+New model should contain all of the variables (which means merging on the 2025 data), but be careful when incorporating the procedural data. Then when recalculating make sure to add AUC back in.
+
+```{r}
+# Load in the Datasets, categorize them the same way
+library(readxl)
+# Load all data
+df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
+dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
+
+# Get time
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+df$time <- match(df$strBlock, labels)
+
+# Grab last rotation
+last_rotation <- df %>%
+  group_by(UniqueID) %>%
+  summarise(last_service = last(service))
+
+# Neuters
+neuter_counts <- dfproc %>%
+  filter(skill %in% c("Ovarioectomy/Ovariohysterectomy", "Castration")) %>%
+  left_join(last_rotation, by = c("ID" = "UniqueID")) %>%
+  mutate(catalog_number = ifelse(is.na(catalog_number), last_service, catalog_number)) %>%
+  group_by(ID, catalog_number, skill) %>%
+  summarise(total = sum(total_number_performed, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = skill, 
+              values_from = total,
+              values_fill = 0) %>%
+  rename(Ov = `Ovarioectomy/Ovariohysterectomy`)
+
+# Calculate Cumulative Castrations and Ovariectomies
+df <- df %>%
+  left_join(neuter_counts, by = c("UniqueID" = "ID", "service" = "catalog_number")) %>%
+  mutate(
+    Ov = coalesce(Ov, 0),
+    Castration = coalesce(Castration, 0),
+    OvPerformed = ave(Ov, UniqueID, FUN = cumsum),
+    CastrationPerformed = ave(Castration, UniqueID, FUN = cumsum)
+  )
+
+# Rename PIPOverall to PIPYN
+df <- df %>%
+  rename(PIPYN = PIPOverall)
+
+# Split df back into df24 and df25
+df24 <- df[df$UniqueID<=117,]
+df25 <- df[df$UniqueID>117,]
+# Also filter df25 so that all the times are <= 21
+df25 <- df25[df25$time <= 21,]
+
+# Drop the other dataframes to clear the environment
+keep_objects <- c("df", "df24", "df25")
+rm(list = setdiff(ls(), keep_objects))
+```
+
+
+
+```{r}
+# Linear Regression and XGBoost (no detrending necessary)
+
+# Variables to use in model building:
+# 2024 Data: time + PIPYN + Ovariectomies + Castrations + early + Hosp 
+# 2025 Data: time + PIPYN + Ovariectomies + Castrations + early + Hosp
+
+
+# medical, procedural, clinical reasoning, professionalism and collaboration
+
+# Loop over the score variables
+score_variables <- c("medical", "clinical_reasoning", "procedural", "professionalism", "collaboration")
+
+# One linear model per variable
+linearmodels <- list()
+
+for (i in seq_along(score_variables)){
+  score <- score_variables[i]
+  form <- as.formula(paste(score, "~ time + Hosp + PIPYN + OvPerformed + 
+                           CastrationPerformed + Early"))
+  model <- lm(form, data = df24)
+  linearmodels[[i]] <- model
+  names(linearmodels)[i] <- score
+}
+
+# Now use these linear models to make predictions using the 2025 data
+linearpredictions <- data.frame(UniqueID = df25$UniqueID)
+for (score in score_variables) {
+  model <- linearmodels[[score]]
+  linearpredictions[score] <- predict(model, newdata = df25)
+}
+
+# Now calculate RMSE 
+linear_rmse <- numeric(length(score_variables))
+names(linear_rmse) <- score_variables
+
+for (i in seq_along(score_variables)) {
+  score <- score_variables[i]
+  linear_rmse[i] <- sqrt(mean((df25[[score]] - linearpredictions[[score]])^2, na.rm=TRUE))
+}
+
+# Also Calculate Training MSE 
+training_mse <- numeric(length(score_variables))
+names(training_mse) <- score_variables
+for (i in seq_along(linearmodels)) {
+  training_mse[i] <- mean(residuals(linearmodels[[i]])^2)
+}
+
+training_mse
+linear_rmse
+
+```
+
+```{r}
+
+xgbmse <- data.frame(Attribute = character(), RMSE = numeric(), R2 = numeric(), Train_RMSE = numeric())
+
+set.seed(123)
+fold_data <- df24$procedural
+fold_data <- fold_data[!is.na(fold_data)]
+folds <- createFolds(fold_data, k = 5, list = TRUE)
+predictors24 <- c("time", "Hosp", "PIPYN" ,  "OvPerformed",   
+                  "CastrationPerformed" , "Early")
+
+for(i in score_variables){
+  # Remove NA
+  labels <- df24[[i]]
+  labels[is.na(labels)] <- median(labels, na.rm = TRUE)
+  
+  # 2024 Training Set
+  dtrain <- xgb.DMatrix(data = as.matrix(df24[, predictors24]), 
+                        label = labels)
+  
+  # Model Parameters
+  params <- list(
+    objective = "reg:squarederror",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  
+  # Train on 2024
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    verbose = 0
+  )
+  
+  # Predictions on test set
+  dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24]))
+  pred <- predict(xgb_model, dtest)
+  
+  # Test RMSE and R2
+  test_labels <- df25[[i]]
+  rmse <- sqrt(mean((pred - test_labels)^2, na.rm = TRUE))
+  ss_total <- sum((test_labels - mean(test_labels, na.rm = TRUE))^2, na.rm = TRUE)
+  ss_residual <- sum((test_labels - pred)^2, na.rm = TRUE)
+  r_squared <- 1 - ss_residual/ss_total
+  
+  # Training RMSE
+  train_pred <- predict(xgb_model, dtrain)
+  train_rmse <- sqrt(mean((train_pred - labels)^2, na.rm = TRUE))
+  
+  # Update results
+  xgbmse <- rbind(xgbmse, data.frame(
+    Attribute = i,
+    RMSE = rmse,
+    Train_RMSE = train_rmse
+  ))
+}
+
+print(xgbmse)
+
+
+
+```
+
+
+
+```{r}
+library(pROC)
+
+predict_and_evaluate <- function(model_list, new_data, target_vars, train_data = NULL) {
+  results <- data.frame(
+    Variable = character(),
+    Test_Accuracy = numeric(),
+    Test_AUC = numeric(),
+    Train_Accuracy = numeric(),
+    Train_AUC = numeric()
+  )
+  for (i in seq_along(target_vars)) {
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    var_comp_name <- paste0(var, "_comp")
+    
+    # Test set
+    new_data[[var_comp_name]] <- ifelse(new_data[[var]] >= 4, 1, 0)
+    pred_prob <- predict(model, newdata = new_data, type = "response")
+    pred_class <- ifelse(pred_prob >= 0.5, 1, 0)
+    actual <- new_data[[var_comp_name]]
+    test_accuracy <- mean(pred_class == actual, na.rm = TRUE)
+    test_auc <- if (length(unique(actual[!is.na(actual)])) == 2) {
+      as.numeric(roc(actual, pred_prob, quiet=TRUE)$auc)
+    } else { NA }
+    
+    # Training set
+    if (!is.null(train_data)) {
+      train_data[[var_comp_name]] <- ifelse(train_data[[var]] >= 4, 1, 0)
+      train_prob <- predict(model, newdata = train_data, type = "response")
+      train_class <- ifelse(train_prob >= 0.5, 1, 0)
+      train_actual <- train_data[[var_comp_name]]
+      train_accuracy <- mean(train_class == train_actual, na.rm = TRUE)
+      train_auc <- if (length(unique(train_actual[!is.na(train_actual)])) == 2) {
+        as.numeric(roc(train_actual, train_prob, quiet=TRUE)$auc)
+      } else { NA }
+    } else {
+      train_accuracy <- NA
+      train_auc <- NA
+    }
+    
+    results <- rbind(results, data.frame(
+      Variable = var,
+      Test_Accuracy = test_accuracy,
+      Test_AUC = test_auc,
+      Train_Accuracy = train_accuracy,
+      Train_AUC = train_auc
+    ))
+  }
+  return(results)
+}
+
+# Run prediction and evaluation on df25, with training accuracy from df24
+logit_results <- predict_and_evaluate(logitmodels, df25, target_vars, train_data = df24)
+print(logit_results)
+```
+
+
+```{r}
+library(pROC)
+
+predict_and_evaluate_xgb <- function(model_list, new_data, target_vars, train_data) {
+  results <- data.frame(
+    Variable = character(),
+    Test_Accuracy = numeric(),
+    Test_AUC = numeric(),
+    Train_Accuracy = numeric(),
+    Train_AUC = numeric()
+  )
+  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early")
+  for (i in seq_along(target_vars)) {
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    var_comp_name <- paste0(var, "_comp")
+    
+    # Test set
+    new_data[[var_comp_name]] <- ifelse(new_data[[var]] >= 4, 1, 0)
+    dtest <- xgb.DMatrix(data = as.matrix(new_data[, predictors]))
+    pred_prob <- predict(model, dtest)
+    pred_class <- ifelse(pred_prob >= 0.5, 1, 0)
+    actual <- new_data[[var_comp_name]]
+    test_accuracy <- mean(pred_class == actual, na.rm = TRUE)
+    test_auc <- if (length(unique(actual[!is.na(actual)])) == 2) {
+      as.numeric(roc(actual, pred_prob, quiet=TRUE)$auc)
+    } else {
+      NA
+    }
+    
+    # Training set
+    train_data[[var_comp_name]] <- ifelse(train_data[[var]] >= 4, 1, 0)
+    dtrain <- xgb.DMatrix(data = as.matrix(train_data[, predictors]))
+    train_prob <- predict(model, dtrain)
+    train_class <- ifelse(train_prob >= 0.5, 1, 0)
+    train_actual <- train_data[[var_comp_name]]
+    train_accuracy <- mean(train_class == train_actual, na.rm = TRUE)
+    train_auc <- if (length(unique(train_actual[!is.na(train_actual)])) == 2) {
+      as.numeric(roc(train_actual, train_prob, quiet=TRUE)$auc)
+    } else {
+      NA
+    }
+    
+    results <- rbind(results, data.frame(
+      Variable = var,
+      Test_Accuracy = test_accuracy,
+      Test_AUC = test_auc,
+      Train_Accuracy = train_accuracy,
+      Train_AUC = train_auc
+    ))
+  }
+  return(results)
+}
+
+# Run prediction and evaluation on df25, with training metrics from df24
+xgb_class_results <- predict_and_evaluate_xgb(xgb_models, df25, target_vars, train_data = df24)
+print(xgb_class_results)
+
+
+```
+
+```{r}
+evaluate_multinom_models <- function(model_list, new_data, target_vars, train_data = NULL) {
+  results <- data.frame(
+    Variable = character(), 
+    Test_RMSE = numeric(),
+    Test_Accuracy = numeric(),
+    Test_Within1Accuracy = numeric(),
+    Train_RMSE = numeric(),
+    Train_Accuracy = numeric(),
+    Train_Within1Accuracy = numeric()
+  )
+  
+  for (i in seq_along(target_vars)) {
+    var <- target_vars[i]
+    model <- model_list[[i]]
+    pred_probs <- predict(model, newdata = new_data, type = "probs")
+    classes <- as.numeric(colnames(pred_probs))
+    expected_scores <- rowSums(sweep(pred_probs, 2, classes, `*`))
+    pred_class <- as.numeric(as.character(predict(model, newdata = new_data, type = "class")))
+    actual <- new_data[[var]]
+    complete_cases <- !is.na(actual)
+    test_rmse <- sqrt(mean((expected_scores[complete_cases] - actual[complete_cases])^2, na.rm = TRUE))
+    test_accuracy <- mean(pred_class[complete_cases] == actual[complete_cases], na.rm = TRUE)
+    test_within1 <- mean(abs(pred_class[complete_cases] - actual[complete_cases]) <= 1, na.rm = TRUE)
+    
+    if (!is.null(train_data)) {
+      train_pred_probs <- predict(model, newdata = train_data, type = "probs")
+      train_classes <- as.numeric(colnames(train_pred_probs))
+      train_expected_scores <- rowSums(sweep(train_pred_probs, 2, train_classes, `*`))
+      train_pred_class <- as.numeric(as.character(predict(model, newdata = train_data, type = "class")))
+      train_actual <- train_data[[var]]
+      train_complete_cases <- !is.na(train_actual)
+      train_rmse <- sqrt(mean((train_expected_scores[train_complete_cases] - train_actual[train_complete_cases])^2, na.rm = TRUE))
+      train_accuracy <- mean(train_pred_class[train_complete_cases] == train_actual[train_complete_cases], na.rm = TRUE)
+      train_within1 <- mean(abs(train_pred_class[train_complete_cases] - train_actual[train_complete_cases]) <= 1, na.rm = TRUE)
+    } else {
+      train_rmse <- NA
+      train_accuracy <- NA
+      train_within1 <- NA
+    }
+    
+    results <- rbind(results, data.frame(
+      Variable = var,
+      Test_RMSE = test_rmse,
+      Test_Accuracy = test_accuracy,
+      Test_Within1Accuracy = test_within1,
+      Train_RMSE = train_rmse,
+      Train_Accuracy = train_accuracy,
+      Train_Within1Accuracy = train_within1
+    ))
+  }
+  return(results)
+}
+
+# Evaluate models on 2025 data, with training metrics from df24
+multinom_results <- evaluate_multinom_models(multinom_models, df25, score_variables, train_data = df24)
+print(multinom_results)
+```
+
 
