@@ -150,6 +150,8 @@ fold_data <- fold_data[!is.na(fold_data)]
 folds <- createFolds(fold_data, k = 5, list = TRUE)
 predictors24 <- c("time",  "PIPYN" ,  "OvPerformed",   
                            "CastrationPerformed" , "Early")
+attribute_names<- list("Medical", "Clinical Reasoning", "Procedural", "Professionalism", "Collaboration" )
+names(attribute_names)<- score_variables
 
 for(i in score_variables){
   # Remove NA
@@ -178,7 +180,11 @@ for(i in score_variables){
     verbose = 0
   )
   
-  # Predictions
+  #Feature Importance
+  importance_matrix<- xgb.importance(model = xgb_model)
+  xgb.plot.importance(importance_matrix, main = paste(attribute_names[i],"Feature Importance"))
+  
+  # Predictions for 2025
   dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24]))
   pred <- predict(xgb_model, dtest)
   
@@ -198,6 +204,7 @@ for(i in score_variables){
 }
 
 print(xgbmse)
+
 ```
 
 ```{r}
@@ -613,7 +620,7 @@ New model should contain all of the variables (which means merging on the 2025 d
 # Load in the Datasets, categorize them the same way
 library(readxl)
 # Load all data
-df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
+df <- read_xlsx("../../UpdatedDataBlind.xlsx", sheet = 1)
 dfproc <- read_xlsx("../Data/FinalProcedures.xlsx", sheet = 1)
 
 # Get time
@@ -661,7 +668,6 @@ df25 <- df25[df25$time <= 21,]
 
 # Drop the other dataframes to clear the environment
 keep_objects <- c("df", "df24", "df25")
-rm(list = setdiff(ls(), keep_objects))
 ```
 
 
@@ -757,6 +763,10 @@ for(i in score_variables){
     verbose = 0
   )
   
+   #Feature Importance
+  importance_matrix<- xgb.importance(model = xgb_model)
+  xgb.plot.importance(importance_matrix, main = paste(attribute_names[i],"Feature Importance"))
+  
   # Predictions on test set
   dtest <- xgb.DMatrix(data = as.matrix(df25[, predictors24]))
   pred <- predict(xgb_model, dtest)
@@ -786,10 +796,31 @@ print(xgbmse)
 
 ```
 
-
+Logit
 
 ```{r}
 library(pROC)
+target_vars<- c("medical", "clinical_reasoning", "professionalism", "collaboration", "procedural")
+
+create_logit_model <- function(df, var){
+  # Create binary outcome variable
+  var_comp_name <- paste0(var, "_comp")
+  df[[var_comp_name]] <- ifelse(df[[var]] >= 4, 1, 0)
+  
+  # Create formula using the binary outcome
+  form <- as.formula(paste(var_comp_name, "~ time + PIPYN + Hosp + OvPerformed + 
+                          CastrationPerformed + Early"))
+  logit <- glm(form, data = df, family = binomial)
+  return(logit)
+}
+
+logitmodels <- list()
+target_vars <- score_variables
+for (i in seq_along(target_vars)){
+  var <- target_vars[i]
+  logitmodels[[i]] <- create_logit_model(df24, var)
+  names(logitmodels)[i] <- var  # Name the list elements
+}
 
 predict_and_evaluate <- function(model_list, new_data, target_vars, train_data = NULL) {
   results <- data.frame(
@@ -813,6 +844,8 @@ predict_and_evaluate <- function(model_list, new_data, target_vars, train_data =
     test_auc <- if (length(unique(actual[!is.na(actual)])) == 2) {
       as.numeric(roc(actual, pred_prob, quiet=TRUE)$auc)
     } else { NA }
+    roc_obj<- roc(actual, pred_prob, quit = TRUE)
+    plot(roc_obj, print.auc = TRUE, main = paste("ROC Curve for", attribute_names[i], "Competency"))
     
     # Training set
     if (!is.null(train_data)) {
@@ -906,8 +939,25 @@ print(xgb_class_results)
 
 
 ```
+Multinomial
 
 ```{r}
+# Store the models
+# This is basically going to be the same as the logistic regression code
+multinom_models <- list()
+for (i in seq_along(score_variables)) {
+  var <- score_variables[i]
+  #Formula
+  form <- as.formula(paste(var, "~ time + PIPYN + OvPerformed + Hosp + CastrationPerformed + Early"))
+  # Train multinomial model
+  # Add more iterations
+  model <- multinom(form, data = df24, maxit = 500, trace = FALSE)
+  # Store the model
+  multinom_models[[i]] <- model
+  # Name the model
+  names(multinom_models)[i] <- var
+}
+
 evaluate_multinom_models <- function(model_list, new_data, target_vars, train_data = NULL) {
   results <- data.frame(
     Variable = character(), 

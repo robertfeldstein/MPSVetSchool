@@ -264,12 +264,9 @@ set.seed(0627)
 predictors24 <- c("PIPYN", "time","CastrationPerformed", "OvPerformed", "Hosp", "Early")
 target_vars<- c("medical", "clinical_reasoning", "professionalism", "collaboration", "procedural")
 df24 <- df24[!is.na(df24$procedural), ]
-#split data into train and test sets
-train_index24 = createDataPartition(y = df24$procedural, p = 0.8, list = FALSE)
-train24<- df24[train_index,]
-test24<- df24[-train_index,]
-#define k-fold cross validation
-control24<- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+train_students<- sample(studentids, size = 0.8 * length(studentids) )
+train24 = df24 |> filter(UniqueID %in% train_students)
+test24 = df24 |> filter(!(UniqueID %in% train_students))
 
 #baseline RMSE for comparison
 baseline_rmse_proc24<- sd(df24$procedural, na.rm = TRUE)
@@ -283,15 +280,12 @@ for(i in target_vars){
  
   #impute missing values with the median
  labels[is.na(labels)]<- median(labels, na.rm = TRUE)
- #train data for current attribute
- Dtrain<- as.matrix(train24[, predictors24]) 
- Dtrain <- data.frame(Dtrain, target = labels)
-  
- xgb_model<- train(target ~. , data = Dtrain, method = "xgbTree",
-                   trControl = control, metric = "RMSE")
- #get test set predictions
- Dtest<- as.matrix(test24[,predictors24]) 
- test_labels<- test24[[i]]
+Dtrain<- xgb.DMatrix(data = as.matrix(train_df[,predictors]),
+                       label = train_df[[i]])
+  Dtest<- xgb.DMatrix(data = as.matrix(test_df[,predictors]),
+                      label = test_df[[i]])
+  #Fit model
+  model <- xgboost(data = Dtrain, objective = "reg:squarederror", nrounds = 50, verbose = 0 )
  pred<- predict(xgb_model, newdata = Dtest )
  
  #get performance metrics

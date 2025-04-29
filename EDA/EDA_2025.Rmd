@@ -23,7 +23,7 @@ library(tidyr)
 Load data 
 ```{r}
 df <- read.xlsx("../Data/FinalDataSet.xlsx")
-df_25 <- read.xlsx("../Data/2025Blind.xlsx")
+df_25 <- read.xlsx("../../UpdatedDataBlind.xlsx")
 ```
 
 Plot for mean scores over time for core attributes
@@ -142,8 +142,7 @@ ggplot() +
   geom_smooth(data = df_25_plot_data, aes(x = strBlockint, y = Average, color = "2025"), method = "lm", se = FALSE) +
   labs(title = "Average Scores Over Time for 2024 & 2025", x = "Rotation Block", y = "Average Score", color = "Year") +
   scale_color_manual(values = c("2024" = "purple", "2025" = "orange")) +
-  scale_x_continuous(breaks = unique(sample_df24$strBlockint))+
-  theme_minimal()
+  scale_x_continuous(breaks = unique(sample_df24$strBlockint))
 
 ggsave("../images/yearly_score_comparison.png", width = 10, height = 6)
 ```
