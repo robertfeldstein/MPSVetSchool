@@ -17,7 +17,7 @@ library(tidyr)
 
 Load data 
 ```{r}
-df <- read.xlsx("Data/FinalDataSet.xlsx")
+df <- read.xlsx("../Data/CompleteData.xlsx")
 ```
 
 # Data Summary
@@ -49,7 +49,7 @@ ggplot(core_df_grouped_long, aes(x = strBlock, y = Score, color = Attribute)) + 
 
 
 # Save this image to the images folder
-ggsave("images/mean_scores.png", width = 10, height = 6)
+ggsave("../images/mean_scores.png", width = 10, height = 6)
 
 
 ```
@@ -81,14 +81,14 @@ core_df_cor <- cor(core_df_cor)
 ggplot(data = as.data.frame(as.table(core_df_cor)), aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) + theme_minimal() + labs(title = "Correlation Matrix of Core Attributes", x = "Attribute", y = "Attribute", fill = "Correlation") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # Save this image to the images folder
-ggsave("images/correlation_matrix.png", width = 10, height = 6)
+ggsave("../images/correlation_matrix.png", width = 10, height = 6)
 ```
 
 ```{r}
 # Make some violin plots of the core attributes with the other attributes 
 
 # predictive variables (these are binary)
-non_score_vars <- c("Hosp", "Early", "PIPActive", "PIPYN")
+non_score_vars <- c("Hosp", "Early", "PIPOverall")
 score_categories <- c("medical", "clinical_reasoning", "professionalism", "collaboration")
 
 boxplot <- function(df, x, y) {
@@ -282,7 +282,7 @@ ggplot(grouped_df, aes(x = strBlock, y = points, color = core_category, group = 
   theme(legend.position = "top")
 
 # Save to images
-ggsave("images/badges_over_time.png", width = 10, height = 6, units = "in")
+ggsave("../images/badges_over_time.png", width = 10, height = 6, units = "in")
 
 
 
@@ -313,7 +313,7 @@ hist(max_badges$professionalism_badges, main = "Histogram of Professionalism Bad
 ```{r}
 # Make some mosaic plots to see the distribution of badges compared to the hospital work
 
-individual_df <- df %>% group_by(UniqueID) %>% summarise(hospital = mean(Hosp), early = mean(Early), pip = mean(PIPYN))
+individual_df <- df %>% group_by(UniqueID) %>% summarise(hospital = mean(Hosp), early = mean(Early), pip = mean(PIPOverall))
 
 # Merge with the max_badges data on the uniqueID
 

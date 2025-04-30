@@ -126,9 +126,7 @@ linear_rmse
 
 ```{r}
 
-for (model in linearmodels){
-  print(mean(residuals(model)^2))
-}
+summary(linearmodels$medical)
 
 ```
 
@@ -350,7 +348,7 @@ predict_and_evaluate <- function(model_list, new_data, target_vars) {
 }
 
 # Run prediction and evaluation on df25
-logit_results <- predict_and_evaluate(logitmodels, df25, target_vars)
+logit_results <- predict_and_evaluate(logitmodels, df25, score_variables)
 print(logit_results)
 
 ```
@@ -667,7 +665,8 @@ df25 <- df[df$UniqueID>117,]
 df25 <- df25[df25$time <= 21,]
 
 # Drop the other dataframes to clear the environment
-keep_objects <- c("df", "df24", "df25")
+# keep_objects <- c("df", "df24", "df25")
+
 ```
 
 
@@ -724,6 +723,12 @@ training_mse
 linear_rmse
 
 ```
+
+```{r}
+# Get the linear model summary for medical
+summary(linearmodels$medical)
+```
+
 
 ```{r}
 
@@ -874,8 +879,12 @@ predict_and_evaluate <- function(model_list, new_data, target_vars, train_data =
 }
 
 # Run prediction and evaluation on df25, with training accuracy from df24
-logit_results <- predict_and_evaluate(logitmodels, df25, target_vars, train_data = df24)
+logit_results <- predict_and_evaluate(logitmodels, df25, score_variables, train_data = df24)
 print(logit_results)
+```
+
+```{r}
+summary(logitmodels$medical)
 ```
 
 
@@ -1016,4 +1025,14 @@ multinom_results <- evaluate_multinom_models(multinom_models, df25, score_variab
 print(multinom_results)
 ```
 
+```{r}
+# Easiest to just run a medical multinomial with 4 vs. 3
 
+df$medical_factor <- as.factor(df$medical)
+# Relevel so the reference is 3
+df$medical_factor <- relevel(df$medical_factor, ref = "3")
+medicalmodel <- multinom(medical_factor~time + Early + Hosp + PIPYN + OvPerformed + CastrationPerformed,
+                                 data = df, maxit = 500, trace = FALSE)
+
+summary(medicalmodel)
+```
