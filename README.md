@@ -26,3 +26,63 @@ STSCI 5999 Project Repository
 
 7. As appropriate, merge changes from your branch to the main branch. Resolve conflicts as needed.
 
+## Project Directory
+
+### 2025 Analysis
+
+- An R script specific to the 2025 data that runs a series of regression and classification models on the data.
+- Goal is to highlight any specific trends amongst the current class of students.
+
+### Additional Analysis
+
+- A simple R script that tested doing linear regressions in terms of %-change, rather than the score variable.
+
+### ARModels
+
+- An examination of AR, pooling, and within models for panel regression. 
+
+### Data
+
+- The data of the project. This folder is hidden on GitHub.
+
+### Detrend
+
+- A test of linear regression and XGBoost models on the residuals of a linear model, to remove the impacts of time.
+- Goal was to explore if other variables remained significant once time was removed from the model.
+
+### EDA
+
+- A bunch of exploratory data analysis and visualizations
+- Explore the distribution of scores throughout the dataset
+
+### images
+
+- A few exported ggplot images that went in presentations and the final poster.
+
+### ModelAnalysis
+
+- A very long model that compares the predictive scores of Linear Regression, XGBoost, Logistic Regression, and Multinomial
+
+### Multinomial
+
+- A model that explores the accuracy of multinomial regression models.
+- It also explores other categorical prediction models.
+
+### PIPAnalysis
+
+- A bunch of statistical tests to determine if PIPs improve scores significantly.
+
+### PredictiveModel
+
+- Some survival analysis models.
+
+### ProcedureAnalysis
+
+- These were the files where we explored the procedures students performed.
+
+### Replication
+
+- Files where we repeated past analyses completed by the client.
+
+
+
