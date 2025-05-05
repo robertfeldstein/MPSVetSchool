@@ -226,6 +226,7 @@ summary(ord_model)
 ```
 
 ```{r}
+
 library(lme4)
 
 # Fit a mixed-effects model

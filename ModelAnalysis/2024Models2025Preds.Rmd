@@ -974,6 +974,8 @@ multinom_results <- evaluate_multinom_models(multinom_models, df25, score_variab
 print(multinom_results)
 ```
 
+## Multinomial Regression for Report
+
 ```{r}
 # Easiest to just run a medical multinomial with 4 vs. 3
 
@@ -984,4 +986,39 @@ medicalmodel <- multinom(medical_factor~time + Early + Hosp + PIPYN + OvPerforme
                                  data = df, maxit = 500, trace = FALSE)
 
 summary(medicalmodel)
+# We also want the p-values
+s <- summary(medicalmodel)
+coefs <- s$coefficients
+ses <- s$standard.errors
+zvals <- coefs / ses
+pvals <- 2 * (1 - pnorm(abs(zvals)))
+pvals
+
+exp(coefs)
 ```
+
+```{r}
+# Run a POLR model on all of the data
+# Medical ~ Time + Early + Hosp + PIP + Ovariectomies + Castrations
+df$medical_factor <- as.factor(df$medical)
+# Load POLR 
+library(MASS)
+medicalmodel <- polr(medical_factor ~ time + Early + Hosp + PIPYN + OvPerformed + CastrationPerformed,
+                      data = df, Hess = TRUE)
+summary(medicalmodel)
+
+```
+
+```{r}
+# Run a CLM on all the data
+# Load Cumulative Linked Mixed Model pacakge
+library(ordinal)
+
+medicalmodel <- clmm(medical_factor ~ time + Early + Hosp + PIPYN + OvPerformed + CastrationPerformed + (1 | UniqueID),
+                      data = df)
+
+summary(medicalmodel)
+```
+
+
+
