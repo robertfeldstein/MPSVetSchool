@@ -77,7 +77,7 @@ rm(list = setdiff(ls(), keep_objects))
 ```
 
 
-
+## Pooling without Time
 
 ```{r}
 df24s <- df24[, c("UniqueID", "medical", "Hosp", "Early", "PIPYN", "time", "OvPerformed", "CastrationPerformed")]
@@ -86,7 +86,7 @@ df24s <- df24s[complete.cases(df24s), ]
 #df24s$time <- as.numeric(df24s$time)
 df24s$time_copy <- df24s$time
 # Remove df24s$time
-panel_OLS <- plm('medical ~ Hosp + Early + PIPYN + time_copy + OvPerformed + CastrationPerformed',
+panel_OLS <- plm('medical ~ Hosp + Early + PIPYN + OvPerformed + CastrationPerformed',
                  df24s,
                  index = c("UniqueID", "time"),
                  model = 'pooling')
@@ -101,7 +101,9 @@ summary(panel_OLS)
 training_mse <- mean(residuals(panel_OLS)^2)
 # Get the Adjusted R^2
 training_r2 <- summary(panel_OLS)$r.squared[2]
+```
 
+```{r}
 # Make a df25 that does not have missing values for medical (making this matrix needs to be identical)
 df25med <- df25[!is.na(df25$medical), ]
 df25med <- df25med[, c("UniqueID", "time", "medical", "Hosp", "Early", "PIPYN", "OvPerformed", "CastrationPerformed")]
@@ -109,7 +111,6 @@ df25med <- df25med[complete.cases(df25med), ]
 df25med$time_copy <- df25med$time
 df25med$time <- as.numeric(df25med$time)
 df25med$time_copy <- as.numeric(df25med$time_copy)
-
 ```
 
 
@@ -140,6 +141,133 @@ points(as.vector(df25med$medical), col="red")
 
 ```
 
+
+## Pooling with time
+
+```{r}
+# Repeat the above, but while using time in the model
+panel_OLS <- plm('medical ~ Hosp + Early + PIPYN + time_copy + OvPerformed + CastrationPerformed',
+                 df24s,
+                 index = c("UniqueID", "time"),
+                 model = 'pooling')
+
+# Output Coefficients
+summary(panel_OLS)
+```
+
+```{r}
+training_mse <- mean(residuals(panel_OLS)^2)
+# Get the Adjusted R^2
+training_r2 <- summary(panel_OLS)$r.squared[2]
+```
+
+```{r}
+# Make a df25 that does not have missing values for medical (making this matrix needs to be identical)
+df25med <- df25[!is.na(df25$medical), ]
+df25med <- df25med[, c("UniqueID", "time", "medical", "Hosp", "Early", "PIPYN", "OvPerformed", "CastrationPerformed")]
+df25med <- df25med[complete.cases(df25med), ]
+df25med$time_copy <- df25med$time
+df25med$time <- as.numeric(df25med$time)
+df25med$time_copy <- as.numeric(df25med$time_copy)
+```
+
+```{r}
+# Metrics
+prediction <- predict(panel_OLS, newdata = df25med)
+# Testing MSE
+testing_mse <- mean((prediction-df25med$medical)^2)
+# Adjusted r2
+ss_res <- sum((df25med$medical - prediction)^2)
+ss_tot <- sum((df25med$medical - mean(df25med$medical))^2)
+r2 <- 1 - ss_res / ss_tot
+n <- nrow(df25med)
+p <- length(panel_OLS$coefficients) - as.numeric("(Intercept)" %in% names(panel_OLS$coefficients))
+adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
+
+print(training_mse)
+print(training_r2)
+print(testing_mse)
+print(adj_r2)
+```
+
+## Within Estimator, without Time
+
+```{r}
+
+# Instead of doing this, we should make a training and testing set for df24s, because you can't use within on new subjects
+# Random 80%, 20% split
+df24train <- df24s %>%
+  group_by(UniqueID) %>%
+  sample_frac(0.8) %>%
+  ungroup()
+df24test <- df24s %>%
+  anti_join(df24train, by = c("UniqueID", "time"))
+
+panel_within <- plm('medical ~ Hosp + Early + PIPYN + CastrationPerformed + OvPerformed',
+                    df24train,
+                    index = c("UniqueID", "time"),
+                    model = 'within')
+
+summary(panel_within)
+
+training_mse <- mean(residuals(panel_within)^2)
+training_r2 <- summary(panel_within)$r.squared[2]
+```
+
+Because PIPYN, Early, and Hosp are time-invariant, a within estimation model does not output any of the coefficients.
+The only coefficients that get output are the ones that change overtime.
+
+```{r}
+print(training_mse)
+print(training_r2)
+```
+
+
+```{r}
+
+# Manually predict from fixed effects model
+coefs <- coef(panel_within)
+
+X_test <- model.matrix(~ Hosp + Early + PIPYN + CastrationPerformed + OvPerformed, 
+                       data = df24test)
+
+# Drop intercept if present (since 'within' model doesn’t include one)
+if ("(Intercept)" %in% colnames(X_test)) {
+  X_test <- X_test[, setdiff(colnames(X_test), "(Intercept)"), drop = FALSE]
+}
+
+# Ensure column order matches
+X_test <- X_test[, names(coefs), drop = FALSE]
+
+# Compute predictions manually
+prediction <- as.numeric(X_test %*% coefs)
+
+# Mean Squared Error (MSE) on test set
+testing_mse <- mean((prediction - df24test$medical)^2)
+
+# R-squared and Adjusted R-squared
+ss_res <- sum((df24test$medical - prediction)^2)
+ss_tot <- sum((df24test$medical - mean(df24test$medical))^2)
+r2 <- 1 - ss_res / ss_tot
+
+# Adjusted R²: Note — no intercept in within model
+n <- nrow(df24test)
+p <- length(coefs)
+adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
+
+# Optional: Training performance (if available)
+# If you computed training predictions manually, you can do the same for training_mse and training_r2
+# Otherwise, omit the print statements or replace with actual values
+
+print(testing_mse)
+print(r2)
+print(adj_r2)
+
+```
+
+It is not possible to actually make predictions on new individuals. So this code will not run unfortunately.
+
+## Within Estimator (with Time)
 
 ```{r}
 
@@ -173,23 +301,6 @@ print(training_r2)
 
 
 ```{r}
-# Metrics
-# df24test <- pdata.frame(df24test, index = c("UniqueID", "time"))
-# prediction <- predict(panel_within, newdata = df24test)
-# # Testing MSE
-# testing_mse <- mean((prediction-df25med$medical)^2)
-# # Adjusted r2
-# ss_res <- sum((df25med$medical - prediction)^2)
-# ss_tot <- sum((df25med$medical - mean(df25med$medical))^2)
-# r2 <- 1 - ss_res / ss_tot
-# n <- nrow(df25med)
-# p <- length(panel_within$coefficients) - as.numeric("(Intercept)" %in% names(panel_OLS$coefficients))
-# adj_r2 <- 1 - (1 - r2) * (n - 1) / (n - p - 1)
-# 
-# print(training_mse)
-# print(training_r2)
-# print(testing_mse)
-# print(adj_r2)
 
 # Manually predict from fixed effects model
 coefs <- coef(panel_within)
@@ -232,6 +343,94 @@ print(adj_r2)
 
 ```
 
-It is not possible to actually make predictions on new individuals. So this code will not run unfortunately.
+## 2SLS (without Time)
 
+```{r}
+# Something like this
+df24s <- as.data.frame(df24s)
+panel_ahsiao <- plm('diff(medical) ~ lag(diff(medical),1) - 1 + Hosp + PIPYN + Early +OvPerformed + CastrationPerformed | Hosp + Early + PIPYN + OvPerformed + CastrationPerformed + lag(medical, 2:5)',
+                   df24s,
+                   index = c("UniqueID", "time"),
+                   model = 'pooling')
+
+summary(panel_ahsiao)
+```
+
+
+```{r}
+# Calculate Training
+training_mse <- mean(residuals(panel_ahsiao)^2)
+training_r2 <- summary(panel_ahsiao)$r.squared[2]
+```
+
+```{r}
+# Ensure df25med is a data frame
+df25med <- as.data.frame(df25med)
+
+# Create the differenced medical variable and its lag
+df25med <- df25med %>%
+  arrange(UniqueID, time) %>%
+  group_by(UniqueID) %>%
+  mutate(
+    diff_medical = medical - lag(medical, 1),
+    lag_diff_medical = lag(diff_medical, 1)
+  ) %>%
+  ungroup()
+
+# Extract coefficients from your model
+model_coefs <- coef(panel_ahsiao)
+
+# Manually calculate predictions using the coefficients
+df25med <- df25med %>%
+  mutate(predicted_diff = 
+           model_coefs["lag(diff(medical), 1)"] * lag_diff_medical +
+           ifelse(Hosp == 1, model_coefs["Hosp"], 0) +
+           ifelse(PIPYN == 1, model_coefs["PIPYN"], 0) +
+           ifelse(Early == 1, model_coefs["Early"], 0) +
+           ifelse(OvPerformed == 1, model_coefs["OvPerformed"], 0) +
+           ifelse(CastrationPerformed == 1, model_coefs["CastrationPerformed"], 0)
+  )
+
+# Convert predictions from differences back to levels
+df25med <- df25med %>%
+  group_by(UniqueID) %>%
+  mutate(predicted_medical = first(medical)) %>%
+  ungroup()
+
+for(id in unique(df25med$UniqueID)) {
+  idx <- which(df25med$UniqueID == id)
+  if(length(idx) > 1) {
+    for(i in 2:length(idx)) {
+      current_idx <- idx[i]
+      prev_idx <- idx[i-1]
+      if(!is.na(df25med$predicted_diff[current_idx])) {
+        df25med$predicted_medical[current_idx] <- df25med$predicted_medical[prev_idx] + 
+                                                 df25med$predicted_diff[current_idx]
+      } else {
+        # If prediction is NA, use the previous medical value
+        df25med$predicted_medical[current_idx] <- df25med$predicted_medical[prev_idx]
+      }
+    }
+  }
+}
+
+
+```
+
+## Ahsiao Summary
+
+```{r}
+panel_ahsiao <- pgmm('medical ~ lag(medical,1) - 1 + Hosp + PIPYN + Early +OvPerformed + CastrationPerformed +time_copy| time_copy + Hosp + Early + PIPYN + OvPerformed + CastrationPerformed',
+                   df24s,
+                   effect = "individual",
+                   model = 'twosteps')
+
+summary(panel_ahsiao)
+```
+
+```{r}
+# Training MSE
+training_mse <- mean(residuals(panel_ahsiao)^2)
+training_r2 <- summary(panel_ahsiao)$r.squared[2]
+```
 

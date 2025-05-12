@@ -442,3 +442,5 @@ pca$rotation
 biplot(pca, scale = 0)
 ```
 Look at weights to understand the pairing of variables; we see that medical and clinical_reasoning are paired together, while professionalism and collaboration.
+
+
