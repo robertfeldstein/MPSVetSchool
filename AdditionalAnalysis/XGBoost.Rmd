@@ -249,7 +249,7 @@ for(i in target_vars){
     RMSE = metrics["RMSE"],
     R2 = metrics["Rsquared"]
   ))
- #feature importance for original model
+ #feature importance
  importance_matrix <- xgb.importance(feature_names = predictors, 
                                     model = xgb_model$finalModel)
  xgb.plot.importance(importance_matrix) 

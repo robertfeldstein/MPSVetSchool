@@ -830,6 +830,7 @@ predict_and_evaluate <- function(model_list, new_data, target_vars, train_data =
     Train_Accuracy = numeric(),
     Train_AUC = numeric()
   )
+  
   for (i in seq_along(target_vars)) {
     var <- target_vars[i]
     model <- model_list[[i]]
@@ -844,7 +845,14 @@ predict_and_evaluate <- function(model_list, new_data, target_vars, train_data =
     test_auc <- if (length(unique(actual[!is.na(actual)])) == 2) {
       as.numeric(roc(actual, pred_prob, quiet=TRUE)$auc)
     } else { NA }
-    roc_obj<- roc(actual, pred_prob, quit = TRUE)
+    roc_obj <- if (length(unique(actual[!is.na(actual)])) == 2) {
+    roc(actual, pred_prob, quiet = TRUE)
+      } else {
+       NA
+      }
+    if (var == "medical" && !is.na(roc_obj)[1]) {
+  assign("medical_logit_roc", roc_obj, envir = .GlobalEnv)
+}
     plot(roc_obj, print.auc = TRUE, main = paste("ROC Curve for", attribute_names[i], "Competency"))
     
     # Training set
@@ -881,7 +889,55 @@ print(logit_results)
 
 ```{r}
 library(pROC)
+set.seed(123)
 
+create_xgb_model <- function(df, var){
+  # 4,5 is competent
+  var_comp_name <- paste0(var, "_comp")
+  df[[var_comp_name]] <- ifelse(df[[var]] >= 4, 1, 0)
+  # XGboost will crash if the dataset contains NA
+  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early", "Hosp")
+  complete_cases <- complete.cases(df[, c(var_comp_name, predictors)])
+  # Okay now we can actually use XGBoost
+  df_complete <- df[complete_cases, ]
+  # Make a special matrix
+  dtrain <- xgb.DMatrix(
+    data = as.matrix(df_complete[, predictors]), 
+    label = df_complete[[var_comp_name]]
+  )
+  # Looked this up, but here's a way to set up XGBoost for classifiers
+  params <- list(
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    eta = 0.1,
+    max_depth = 6,
+    min_child_weight = 1,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  )
+  # Train XGBoost model
+  xgb_model <- xgb.train(
+    params = params,
+    data = dtrain,
+    nrounds = 100,
+    # Turn off the noise
+    verbose = 0
+  )
+  # Output the model
+  return(xgb_model)
+}
+xgb_models <- list()
+target_vars <- score_variables
+for (i in seq_along(target_vars)){
+  var <- target_vars[i]
+  xgb_model<- create_xgb_model(df24, var)
+  xgb_models[[i]] <- xgb_model
+  #feature importance
+  importance_matrix<- xgb.importance(model = xgb_model)
+  xgb.plot.importance(importance_matrix, main = paste(attribute_names[i],"Feature Importance"))
+  # Name the list
+  names(xgb_models)[i] <- var  
+}
 predict_and_evaluate_xgb <- function(model_list, new_data, target_vars, train_data) {
   results <- data.frame(
     Variable = character(),
@@ -890,7 +946,7 @@ predict_and_evaluate_xgb <- function(model_list, new_data, target_vars, train_da
     Train_Accuracy = numeric(),
     Train_AUC = numeric()
   )
-  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early")
+  predictors <- c("time", "PIPYN", "OvPerformed", "CastrationPerformed", "Early", "Hosp")
   for (i in seq_along(target_vars)) {
     var <- target_vars[i]
     model <- model_list[[i]]
@@ -908,6 +964,15 @@ predict_and_evaluate_xgb <- function(model_list, new_data, target_vars, train_da
     } else {
       NA
     }
+     roc_obj <- if (length(unique(actual[!is.na(actual)])) == 2) {
+    roc(actual, pred_prob, quiet = TRUE)
+      } else {
+       NA
+      }
+    if (var == "medical" && !is.na(roc_obj)[1]) {
+  assign("medical_xgb_roc", roc_obj, envir = .GlobalEnv)
+}
+    plot(roc_obj, print.auc = TRUE, main = paste("ROC Curve for", attribute_names[i], "Competency"))
     
     # Training set
     train_data[[var_comp_name]] <- ifelse(train_data[[var]] >= 4, 1, 0)
@@ -939,6 +1004,20 @@ print(xgb_class_results)
 
 
 ```
+ROC Curve for XGBoost & Logit Medical Competency Classifiers
+```{r}
+logit_auc<- round(auc(medical_logit_roc),3)
+xgb_auc<- round(auc(medical_xgb_roc),3)
+
+plot(medical_logit_roc, col = "blue", lwd = 2, main = "ROC Curve for Medical Competency" )
+lines(medical_xgb_roc, col = "red", lwd = 2)
+
+legend("bottomright",
+       legend = c(paste("Logistic Regression (AUC =", logit_auc, ")"),
+                  paste("XGBoost Logit (AUC =", xgb_auc, ")")),
+       col = c("blue", "red"), lwd = 2)
+```
+
 Multinomial
 
 ```{r}
