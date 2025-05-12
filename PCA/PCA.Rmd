@@ -1,0 +1,54 @@
+---
+title: "PCA"
+author: "Robert Feldstein"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## PCA
+
+In this file, we experiment with Principal Component Analysis
+
+```{r}
+# Load the data
+library(readxl)
+library(dplyr)
+df <- read_xlsx("../Data/CompleteData.xlsx", sheet = 1)
+
+labels <- c("A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4", 
+            "B5", "B6", "C1", "C2", "C3", "C4", "C5", "C6", "D1","D2", 
+            "D3", "D4", "D5", "D6")
+
+# Create a mapping of labels to integers
+label_mapping <- setNames(1:length(labels), labels)
+
+# Convert strBlock column to integers
+df$time<- label_mapping[df$strBlock]
+# Rename PIPOverall to PIPYN
+df <- df %>%
+  rename(PIPYN = PIPOverall) %>%
+  mutate(PIPYN = as.numeric(PIPYN))
+```
+```{r}
+# Run a PCA on the first 9 scoring categories
+
+data <- df[,c("medical", "clinical_reasoning", "professionalism", "collaboration", 
+              "patient_care", "procedural", "oral", "written", "evidence")]
+# Clear out NAs
+data <- data[complete.cases(data), ]
+pca <- prcomp(data, .scale=T)
+pca
+
+
+```
+
+
+```{r}
+summary(pca)
+```
+
+The PCA shows some basic qualities of the dataset. E.g. the first PC indicates that student scores are associated with a relative average intelligence (all weights are positive). PC2 has negative weights on soft skills, representing technical knowledge.
